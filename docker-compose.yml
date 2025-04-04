@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:14
+    container_name: arkacia_db
+    environment:
+      POSTGRES_DB: my_database
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypass
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: arkacia_backend
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URI=postgresql://myuser:mypass@db:5432/my_database
+    depends_on:
+      - db
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: arkacia_frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
