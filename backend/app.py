@@ -2,16 +2,19 @@ from flask import Flask
 from config import Config
 from models import db
 from routes import bp as api_bp
+from auth import auth_bp  # 새로 만든 auth 라우트
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # SQLAlchemy 초기화
     db.init_app(app)
 
-    # Blueprint 등록
+    # 기존 users API (CRUD)
     app.register_blueprint(api_bp, url_prefix='/api')
+
+    # 새로 만든 auth API (회원가입/로그인)
+    app.register_blueprint(auth_bp, url_prefix='/auth')
 
     @app.route('/')
     def index():
@@ -21,10 +24,9 @@ def create_app():
 
 if __name__ == '__main__':
     app = create_app()
-
-    # DB 테이블 생성 (초기 1회만)
     with app.app_context():
+        # ❗ 중요: 기존 테이블 DROP 후 CREATE (개발 환경에서만)
+        #db.drop_all()
         db.create_all()
 
-    # 서버 실행: host='0.0.0.0'로 지정하여 도커 컨테이너 외부 접근 허용
     app.run(host='0.0.0.0', port=5000, debug=True)

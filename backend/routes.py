@@ -3,7 +3,8 @@ from models import db, User
 
 bp = Blueprint('api', __name__)
 
-# 유저 생성 (Create)
+# 유저 생성 (Create) --> auth.py에서 처리
+"""
 @bp.route('/users', methods=['POST'])
 def create_user():
     data = request.get_json()
@@ -19,7 +20,8 @@ def create_user():
     db.session.commit()
 
     return jsonify({'message': 'User created', 'user': user.to_dict()}), 201
-
+"""
+    
 # 유저 목록 /users (Read - list)
 @bp.route('/users', methods=['GET'])
 def get_users():
