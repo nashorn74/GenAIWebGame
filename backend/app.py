@@ -1,11 +1,13 @@
 from flask import Flask
 from config import Config
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from models import db, Character, NPC
+from models import db, Character, NPC, Item
 from routes import bp as api_bp
 from auth import auth_bp
 from characters import characters_bp
-from npcs import npcs_bp  # 우리가 만든 NPC Blueprint
+from npcs import npcs_bp
+from items import items_bp
+from shop import shop_bp
 
 def create_app():
     app = Flask(__name__)
@@ -59,6 +61,8 @@ def create_app():
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(characters_bp, url_prefix='/api')
     app.register_blueprint(npcs_bp, url_prefix='/api')
+    app.register_blueprint(items_bp, url_prefix='/api')
+    app.register_blueprint(shop_bp, url_prefix='/api')
 
     @app.route('/')
     def index():
@@ -74,7 +78,7 @@ if __name__ == '__main__':
         db.create_all()
 
         # 예: Greenfield NPC들을 DB에 미리 추가 (개발용)
-        # 이미 있으면 스킵
+        # 1) NPC 시드
         if NPC.query.count() == 0:
             seed_npcs = [
                 NPC(name='Marina Field',   gender='Female', race='Human', job='Guard', map_key='city2', x=1400, y=600, dialog='Greenfield를 지키는 경비입니다. 반갑습니다!'),
@@ -89,6 +93,46 @@ if __name__ == '__main__':
                 NPC(name='Garrett Leaf',   gender='Male',   race='Human', job='Traveling Merchant', map_key='city2', x=1100, y=650, dialog='안녕하세요!'),
             ]
             db.session.bulk_save_objects(seed_npcs)
+            db.session.commit()
+        
+        # 2) 아이템 시드
+        if Item.query.count() == 0:
+            seed_items = [
+                # --- 몬스터 드롭 아이템 (sell only) ---
+                Item(name='Slime Jelly (슬라임 젤)', category='drop', description='슬라임의 젤, 판매용', sell_price=5,  buy_price=0),
+                Item(name='Boar Meat (멧돼지 고기)', category='drop', description='멧돼지 고기, 식재료같지만 사용X', sell_price=8,  buy_price=0),
+                Item(name='Wolf Fang (늑대 이빨)',  category='drop', description='날카로운 이빨',    sell_price=12, buy_price=0),
+                Item(name='Ice Crystal (얼음 결정)', category='drop', description='차가운 수정',       sell_price=15, buy_price=0),
+                Item(name='Scorpion Stinger (전갈 독침)', category='drop', description='독침, 판매용', sell_price=10, buy_price=0),
+                Item(name='Desert Bandit Gear (도적장비)', category='drop', description='도적이 쓰던 허접한 장비', sell_price=14, buy_price=0),
+                Item(name='Beetle Shell (딱정벌레 껍질)', category='drop', description='단단한 껍질',  sell_price=11, buy_price=0),
+                Item(name='Corrupted Bandage (부패 붕대)', category='drop', description='언데드 저주 붕대', sell_price=16, buy_price=0),
+                Item(name='Ancient Metal Shard (고대 금속 파편)', category='drop', description='고가치 소재지만 제작X', sell_price=25, buy_price=0),
+                Item(name='Sea Crab Shell (게 껍데기)',   category='drop', description='게 껍데기, 식용 불가', sell_price=9,  buy_price=0),
+                Item(name='Sea Serpent Scale (바다 뱀 비늘)', category='drop', description='희귀 비늘, 판매만 가능', sell_price=20, buy_price=0),
+
+                # --- 포션/소비아이템 (buy only) ---
+                Item(name='Small HP Potion',  category='potion', description='HP 50 회복',      buy_price=10, sell_price=0, effect_value=50),
+                Item(name='Medium HP Potion', category='potion', description='HP 120 회복',     buy_price=25, sell_price=0, effect_value=120),
+                Item(name='Large HP Potion',  category='potion', description='HP 250 회복',     buy_price=60, sell_price=0, effect_value=250),
+                Item(name='Antidote',         category='potion', description='독 해제 포션',     buy_price=15, sell_price=0),
+                Item(name='Stamina Drink',    category='potion', description='1분간 이동속+10%', buy_price=20, sell_price=0),
+
+                # --- 무기 (weapon) ---
+                Item(name='Basic Sword',      category='weapon', description='물리 공격력 +5',   buy_price=30, sell_price=0, attack_power=5),
+                Item(name='Iron Sword',       category='weapon', description='물리 공격력 +10',  buy_price=80, sell_price=0, attack_power=10),
+                Item(name='Basic Bow',        category='weapon', description='물리 공격력 +5(원거리)', buy_price=35, sell_price=0, attack_power=5),
+                Item(name='Long Bow',         category='weapon', description='물리 공격력 +10(원거리)', buy_price=85, sell_price=0, attack_power=10),
+                Item(name='Basic Staff',      category='weapon', description='마법 공격력 +5',    buy_price=40, sell_price=0, attack_power=5),
+                Item(name='Enchanted Staff',  category='weapon', description='마법 공격력 +12',  buy_price=120, sell_price=0, attack_power=12),
+
+                # --- 방어구 (armor) ---
+                Item(name='Leather Armor',    category='armor', description='방어력+5(가죽)',    buy_price=25, sell_price=0, defense_power=5),
+                Item(name='Iron Armor',       category='armor', description='방어력+10(철)',     buy_price=70, sell_price=0, defense_power=10),
+                Item(name='Scale Armor',      category='armor', description='방어력+15(비늘)',   buy_price=120, sell_price=0, defense_power=15),
+                Item(name='Mystic Robe',      category='armor', description='방어+5, 마법공+3',  buy_price=90, sell_price=0, defense_power=5, attack_power=3),
+            ]
+            db.session.bulk_save_objects(seed_items)
             db.session.commit()
 
     # socketio 인스턴스를 create_app 내부에서 반환하게 하거나, 전역으로 만들어야 함

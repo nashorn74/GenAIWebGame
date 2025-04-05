@@ -76,12 +76,21 @@ class Character(db.Model):
     intl = db.Column(db.Integer, default=10)  # INT 대신 'intl' 사용 (Python 예약어/가독성)
     # 여기서 원하는 스탯만큼 추가 가능. 또는 JSONField로 한번에 저장할 수도 있음.
 
+    # 보유 골드
+    gold = db.Column(db.Integer, default=100)
+
+    # 인벤토리 (CharacterItem)
+    items = db.relationship('CharacterItem', backref='character', lazy=True)
+
     # 버프/디버프 등 상태이상. 예: ["poison","stun"] JSON 문자열 or ","로 구분
     status_effects = db.Column(db.String(255), default='')
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
+        # 각 CharacterItem을 to_dict() 해 주면 item 정보(attack_power 등)까지 포함 가능
+        item_list = [char_item.to_dict() for char_item in self.items]
+
         return {
             'id': self.id,
             'user_id': self.user_id,
@@ -101,6 +110,8 @@ class Character(db.Model):
             'str': self.str,
             'dex': self.dex,
             'intl': self.intl,
+            'gold': self.gold,   # 보유 골드 표시
+            'items': item_list,  # 인벤토리 목록 표시
             'status_effects': self.status_effects,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
@@ -128,6 +139,29 @@ class Character(db.Model):
     def exp_to_next_level(self):
         """다음 레벨까지 필요한 경험치 공식"""
         return self.level * 100
+
+class CharacterItem(db.Model):
+    """
+    캐릭터가 소지 중인 아이템(인벤토리).
+    """
+    __tablename__ = 'character_items'
+
+    id = db.Column(db.Integer, primary_key=True)
+    character_id = db.Column(db.Integer, db.ForeignKey('characters.id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('items.id'), nullable=False)
+    quantity = db.Column(db.Integer, default=1)
+
+    # 관계
+    item = db.relationship('Item', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'character_id': self.character_id,
+            'item_id': self.item_id,
+            'quantity': self.quantity,
+            'item': self.item.to_dict() if self.item else None
+        }
 
 class Map(db.Model):
     __tablename__ = 'maps'
@@ -174,4 +208,41 @@ class NPC(db.Model):
             'dialog': self.dialog,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+class Item(db.Model):
+    """
+    게임 내 아이템. 몬스터 드롭용 / 상점 판매용 / 장비 / 소비아이템 등 모두 포함.
+    """
+    __tablename__ = 'items'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)          # 아이템 이름 (e.g. "Slime Jelly")
+    category = db.Column(db.String(50), nullable=False)       # "drop", "potion", "weapon", "armor", etc.
+    description = db.Column(db.String(255), default='')       # 툴팁 문구
+
+    # 상점 구매가 (buy_price), 상점 판매가 (sell_price)
+    # 질문 기획에선 "몬스터드롭아이템"은 sell_price만 있고 buy_price는 없음.
+    buy_price = db.Column(db.Integer, default=0)   # 상점에서 구매시 가격 (포션/무기/방어구)
+    sell_price = db.Column(db.Integer, default=0)  # 몬스터 드롭 아이템 판매가
+
+    # 장비(weapon/armor)일 때만 사용. 예: 공격력, 방어력, ...
+    attack_power = db.Column(db.Integer, default=0)
+    defense_power = db.Column(db.Integer, default=0)
+    # 포션 효과, 등. (HP회복량, 해독, etc.)
+    effect_value = db.Column(db.Integer, default=0)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'category': self.category,
+            'description': self.description,
+            'buy_price': self.buy_price,
+            'sell_price': self.sell_price,
+            'attack_power': self.attack_power,
+            'defense_power': self.defense_power,
+            'effect_value': self.effect_value
         }
