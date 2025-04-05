@@ -3,3 +3,5 @@ SQLAlchemy==2.0.4
 psycopg2-binary==2.9.6
 Flask-SQLAlchemy==3.0.5
 python-dotenv==1.0.0
+Flask-SocketIO==5.3.4
+eventlet==0.33.3

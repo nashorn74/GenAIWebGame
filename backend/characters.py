@@ -203,12 +203,15 @@ def gain_exp(char_id):
 @characters_bp.route('/characters/<int:char_id>/stats', methods=['PATCH'])
 def update_stats(char_id):
     """
-    HP/MP, status_effects 등 일부 스탯을 업데이트하는 예시.
+    HP/MP, status_effects, 캐릭터의 스탯(STR, DEX, INT 등) 등 일부 스탯을 업데이트하는 예시.
     예: 
     {
       "hp": 80,
       "mp": 40,
-      "status_effects": "poison"
+      "status_effects": "poison",
+      "str": 15,
+      "dex": 12,
+      "intl": 9
     }
     """
     char = Character.query.get_or_404(char_id)
@@ -221,9 +224,43 @@ def update_stats(char_id):
     if 'status_effects' in data:
         # 실제로는 JSON 파싱/검증 등을 거칠 수도 있음
         char.status_effects = str(data['status_effects'])
+    if 'str' in data:
+        char.str = data['str']
+    if 'dex' in data:
+        char.dex = data['dex']
+    if 'intl' in data:
+        char.intl = data['intl']
 
     db.session.commit()
     return jsonify({
         'message': 'Stats updated',
+        'character': char.to_dict()
+    }), 200
+
+
+@characters_bp.route('/characters/<int:char_id>/move', methods=['PATCH'])
+def move_character(char_id):
+    """
+    캐릭터 이동 API (맵, 좌표 업데이트)
+    요청 JSON 예: {"map_key": "city2", "x": 1280, "y": 1536}
+    """
+    char = Character.query.get_or_404(char_id)
+    data = request.get_json() or {}
+
+    new_map = data.get('map_key', char.map_key)
+    new_x = data.get('x', char.x)
+    new_y = data.get('y', char.y)
+
+    # 여기서 서버에서 맵 범위, 충돌체크, 포탈 이동 처리 등을 해도 됨
+    # 예: check if new_x is within 0~map.widthInPixels?
+    #     check if tile is blocked?
+
+    char.map_key = new_map
+    char.x = new_x
+    char.y = new_y
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Character moved',
         'character': char.to_dict()
     }), 200

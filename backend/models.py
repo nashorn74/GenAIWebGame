@@ -65,6 +65,17 @@ class Character(db.Model):
     mp = db.Column(db.Integer, default=50)
     max_mp = db.Column(db.Integer, default=50)
 
+    # 맵 / 좌표
+    map_key = db.Column(db.String(50), default='worldmap')  # 'worldmap' | 'city2' | 'dungeon1' ...
+    x = db.Column(db.Integer, default=0)                    # 캐릭터의 맵 내 X 좌표
+    y = db.Column(db.Integer, default=0)                    # 캐릭터의 맵 내 Y 좌표
+
+    # --- 스탯 ---
+    str = db.Column(db.Integer, default=10)
+    dex = db.Column(db.Integer, default=10)
+    intl = db.Column(db.Integer, default=10)  # INT 대신 'intl' 사용 (Python 예약어/가독성)
+    # 여기서 원하는 스탯만큼 추가 가능. 또는 JSONField로 한번에 저장할 수도 있음.
+
     # 버프/디버프 등 상태이상. 예: ["poison","stun"] JSON 문자열 or ","로 구분
     status_effects = db.Column(db.String(255), default='')
 
@@ -84,6 +95,12 @@ class Character(db.Model):
             'max_hp': self.max_hp,
             'mp': self.mp,
             'max_mp': self.max_mp,
+            'map_key': self.map_key,
+            'x': self.x,
+            'y': self.y,
+            'str': self.str,
+            'dex': self.dex,
+            'intl': self.intl,
             'status_effects': self.status_effects,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
@@ -111,3 +128,11 @@ class Character(db.Model):
     def exp_to_next_level(self):
         """다음 레벨까지 필요한 경험치 공식"""
         return self.level * 100
+
+class Map(db.Model):
+    __tablename__ = 'maps'
+    key = db.Column(db.String(50), primary_key=True)  # 'worldmap', 'city2', 'dungeon1'
+    display_name = db.Column(db.String(100))
+    width = db.Column(db.Integer)
+    height = db.Column(db.Integer)
+    # tiled json 경로, 음악, 기타 설정 등
