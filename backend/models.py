@@ -136,3 +136,42 @@ class Map(db.Model):
     width = db.Column(db.Integer)
     height = db.Column(db.Integer)
     # tiled json 경로, 음악, 기타 설정 등
+
+# ★ NPC 모델
+class NPC(db.Model):
+    __tablename__ = 'npcs'
+    id = db.Column(db.Integer, primary_key=True)
+
+    name = db.Column(db.String(100), nullable=False)
+    gender = db.Column(db.String(10), default='female')  # 예) female/male
+    race = db.Column(db.String(20), default='Human')
+    job = db.Column(db.String(50), default='Guard')
+
+    # 어떤 맵에 있는지 (예: 'city2' / 'worldmap' 등)
+    map_key = db.Column(db.String(50), default='city2')
+
+    # 맵 내 좌표
+    x = db.Column(db.Integer, default=0)
+    y = db.Column(db.Integer, default=0)
+
+    # 간단한 대사 (더 복잡한 스크립트는 별도 DB나 JSON으로 확장)
+    dialog = db.Column(db.Text, default='안녕하세요!')
+
+    # 활성/비활성, 생성일시
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'gender': self.gender,
+            'race': self.race,
+            'job': self.job,
+            'map_key': self.map_key,
+            'x': self.x,
+            'y': self.y,
+            'dialog': self.dialog,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
