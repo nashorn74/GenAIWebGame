@@ -23,15 +23,34 @@ interface CharacterData {
   name: string
   level: number
   job: string
+  gold: number
+  hp: number
+  max_hp: number
+  mp: number
+  max_mp: number
+  str: number
+  dex: number
+  intl: number
+  map_key: string
+  x: number
+  y: number
+  created_at?: string
   // ... etc.
+}
+
+// userDetails 구조: { user: UserData, characters: CharacterData[] }
+interface UserDetails {
+  user: UserData
+  characters: CharacterData[]
 }
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<UserData[]>([])
   const [searchTerm, setSearchTerm] = useState('')
 
+  // 모달 관련 state
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null)
-  const [userDetails, setUserDetails] = useState<any>(null) // 상세정보 (캐릭터목록 등)
+  const [userDetails, setUserDetails] = useState<UserDetails | null>(null)
   const [openDetail, setOpenDetail] = useState(false)
   const [detailError, setDetailError] = useState<string>('')
 
@@ -58,29 +77,41 @@ export default function AdminUsers() {
   })
 
   // 유저 상세보기 (모달 열기)
+  // 1) /api/users/:id 로 유저 정보
+  // 2) /api/characters?user_id=:id 로 캐릭터 목록
   const handleView = async (user: UserData) => {
     setSelectedUser(user)
     setUserDetails(null)
     setDetailError('')
+    setOpenDetail(true)
 
     try {
-      const res = await fetch(`${BASE_URL}/api/users/${user.id}`)
-      if (!res.ok) {
-        if (res.status === 404) {
+      // 1) 유저 정보
+      const userRes = await fetch(`${BASE_URL}/api/users/${user.id}`)
+      if (!userRes.ok) {
+        if (userRes.status === 404) {
           setDetailError('User detail not found.')
         } else {
           setDetailError('Failed to load user detail.')
         }
-        setOpenDetail(true)
         return
       }
-      const detail = await res.json()
-      setUserDetails(detail)
+      const userJson = await userRes.json()
+
+      // 2) 캐릭터 목록
+      const charsRes = await fetch(`${BASE_URL}/api/characters?user_id=${user.id}`)
+      if (!charsRes.ok) {
+        setDetailError('Failed to load characters.')
+        return
+      }
+      const charsJson = await charsRes.json()
+
+      // 통합해서 저장
+      setUserDetails({ user: userJson, characters: charsJson })
     } catch (err) {
       console.error(err)
       setDetailError('Network error while fetching user detail.')
     }
-    setOpenDetail(true)
   }
 
   const handleCloseDetail = () => {
@@ -215,21 +246,24 @@ export default function AdminUsers() {
             <Typography color="error">{detailError}</Typography>
           ) : userDetails ? (
             <div>
-              <Typography>ID: {userDetails.id}</Typography>
-              <Typography>Email: {userDetails.email}</Typography>
-              <Typography>Bio: {userDetails.bio}</Typography>
-              <Typography>Status: {userDetails.status}</Typography>
-              <Typography>Created: {userDetails.created_at}</Typography>
+              {/* user 부분 */}
+              <Typography>ID: {userDetails.user.id}</Typography>
+              <Typography>Email: {userDetails.user.email}</Typography>
+              <Typography>Bio: {userDetails.user.bio}</Typography>
+              <Typography>Status: {userDetails.user.status}</Typography>
+              <Typography>Created: {userDetails.user.created_at}</Typography>
 
               {/* 캐릭터 목록 */}
               <Typography variant="h6" sx={{ mt: 2 }}>Characters</Typography>
               {userDetails.characters && userDetails.characters.length > 0 ? (
-                userDetails.characters.map((ch: any) => (
-                  <div key={ch.id} style={{ marginBottom: '8px' }}>
-                    <strong>{ch.name}</strong> (Lv.{ch.level}, {ch.job})
-                    <div>Gold: {ch.gold}</div>
+                userDetails.characters.map((ch: CharacterData) => (
+                  <div key={ch.id} style={{ marginBottom: '8px', paddingLeft: 16 }}>
+                    <strong>{ch.name}</strong> 
+                    {' '} (Lv.{ch.level}, {ch.job})
                     <div>HP: {ch.hp}/{ch.max_hp}, MP: {ch.mp}/{ch.max_mp}</div>
-                    {/* 필요시 인벤토리, 아이템 목록 등도 표시 가능 */}
+                    <div>Gold: {ch.gold}</div>
+                    <div>Location: {ch.map_key} (x:{ch.x}, y:{ch.y})</div>
+                    <div>STR: {ch.str}, DEX: {ch.dex}, INT: {ch.intl}</div>
                   </div>
                 ))
               ) : (
