@@ -2,7 +2,7 @@ from flask import Flask
 from flask_cors import CORS
 from config import Config
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from models import db, Character, NPC, Item
+from models import db, Character, NPC, Item, Map
 from routes import bp as api_bp
 from auth import auth_bp
 from auth_admin import admin_auth_bp
@@ -10,6 +10,7 @@ from characters import characters_bp
 from npcs import npcs_bp
 from items import items_bp
 from shop import shop_bp
+from maps import maps_bp
 
 def create_app():
     app = Flask(__name__)
@@ -68,6 +69,7 @@ def create_app():
     app.register_blueprint(items_bp, url_prefix='/api')
     app.register_blueprint(shop_bp, url_prefix='/api')
     app.register_blueprint(admin_auth_bp, url_prefix='/auth')  # /auth/admin_login
+    app.register_blueprint(maps_bp, url_prefix='/api')
 
     @app.route('/')
     def index():
@@ -79,7 +81,7 @@ if __name__ == '__main__':
     app, socketio = create_app()
     with app.app_context():
         # ❗ 중요: 기존 테이블 DROP 후 CREATE (개발 환경에서만)
-        #db.drop_all()
+        db.drop_all()
         db.create_all()
 
         # 예: Greenfield NPC들을 DB에 미리 추가 (개발용)
@@ -138,6 +140,83 @@ if __name__ == '__main__':
                 Item(name='Mystic Robe',      category='armor', description='방어+5, 마법공+3',  buy_price=90, sell_price=0, defense_power=5, attack_power=3),
             ]
             db.session.bulk_save_objects(seed_items)
+            db.session.commit()
+        
+        # 3) Map 시드
+        if Map.query.count() == 0:
+            seed_maps = [
+                Map(
+                    key='worldmap',
+                    display_name='World Map',
+                    json_file='worldmap.json',
+                    tileset_file='tmw_grass_spacing.png',
+                    tile_width=128,
+                    tile_height=128,
+                    width=40,
+                    height=60,
+                    map_data='''{
+                        "start_position": [6,12],
+                        "teleports": [
+                            {
+                                "from": {"x":14,"y":15},
+                                "to_map":"city2",
+                                "to_position":[13,2]
+                            },
+                            {
+                                "from": {"x":12,"y":8},
+                                "to_map":"dungeon1",
+                                "to_position":[10,2]
+                            }
+                        ]
+                    }'''
+                ),
+                Map(
+                    key='city2',
+                    display_name='Greenfield City',
+                    json_file='city2.json',
+                    tileset_file='tmw_city_spacing.png',
+                    tile_width=128,
+                    tile_height=128,
+                    width=20,
+                    height=30,
+                    map_data='''{
+                        "start_position": [13,2],
+                        "teleports": [
+                            {
+                                "from":{"y":0,"xRange":[11,15]},
+                                "to_map":"worldmap",
+                                "to_position":[13,15]
+                            },
+                            {
+                                "from":{"y":29,"xRange":[11,15]},
+                                "to_map":"worldmap",
+                                "to_position":[13,15]
+                            }
+                        ]
+                    }'''
+                ),
+                Map(
+                    key='dungeon1',
+                    display_name='Dungeon 1',
+                    json_file='dungeon1.json',
+                    tileset_file='tmw_dungeon_spacing.png',
+                    tile_width=128,
+                    tile_height=128,
+                    width=20,
+                    height=30,
+                    map_data='''{
+                        "start_position": [10,2],
+                        "teleports": [
+                            {
+                                "from":{"y":0,"xRange":[8,12]},
+                                "to_map":"worldmap",
+                                "to_position":[12,9]
+                            }
+                        ]
+                    }'''
+                )
+            ]
+            db.session.bulk_save_objects(seed_maps)
             db.session.commit()
 
     # socketio 인스턴스를 create_app 내부에서 반환하게 하거나, 전역으로 만들어야 함

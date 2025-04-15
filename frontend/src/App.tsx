@@ -9,6 +9,7 @@ import AdminUsers from './admin/pages/AdminUsers'
 // PrivateRoute
 import PrivateRoute from './admin/PrivateRoute'
 import AdminCharacters from './admin/pages/AdminCharacters'
+import AdminMaps from './admin/pages/AdminMaps'
 
 export default function App() {
   return (
@@ -39,7 +40,15 @@ export default function App() {
               </PrivateRoute>
             }
           />
-          {/* 여기에 maps, npcs, items 등도 추가 가능 */}
+          <Route
+            path="maps"
+            element={
+              <PrivateRoute>
+                <AdminMaps />
+              </PrivateRoute>
+            }
+          />
+          {/* 여기에 npcs, items 등도 추가 가능 */}
         </Route>
       </Routes>
     </BrowserRouter>

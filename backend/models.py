@@ -169,11 +169,53 @@ class CharacterItem(db.Model):
 
 class Map(db.Model):
     __tablename__ = 'maps'
-    key = db.Column(db.String(50), primary_key=True)  # 'worldmap', 'city2', 'dungeon1'
+    
+    # 예: worldmap, city2, dungeon1
+    key = db.Column(db.String(50), primary_key=True)
+    
+    # 맵 표시 이름 (UI용)
     display_name = db.Column(db.String(100))
-    width = db.Column(db.Integer)
-    height = db.Column(db.Integer)
-    # tiled json 경로, 음악, 기타 설정 등
+    
+    # 실제 Tiled JSON 파일명 (예: 'worldmap.json')
+    json_file = db.Column(db.String(100), default='')
+    
+    # 타일셋 이미지 파일명 (예: 'tmw_grass_spacing.png')
+    tileset_file = db.Column(db.String(100), default='')
+    
+    # 맵의 tileWidth / tileHeight
+    tile_width = db.Column(db.Integer, default=128)
+    tile_height = db.Column(db.Integer, default=128)
+    
+    # 맵 전체 (in tiles)
+    width = db.Column(db.Integer, default=40)   # tile 개수
+    height = db.Column(db.Integer, default=30)  # tile 개수
+
+    # ★ 추가: 맵 이동 및 시작좌표 등 JSON을 저장
+    # 예: {
+    #   "start_position": [6,12],
+    #   "teleports": [
+    #       { "from": {"x":14,"y":15}, "to_map":"city2", "to_position":[13,2] },
+    #       ...
+    #   ]
+    # }
+    map_data = db.Column(db.Text, default='{}')
+    
+    # 더 필요한 정보(음악, BGM 파일명, etc.) 있으면 추가 가능
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'key': self.key,
+            'display_name': self.display_name,
+            'json_file': self.json_file,
+            'tileset_file': self.tileset_file,
+            'tile_width': self.tile_width,
+            'tile_height': self.tile_height,
+            'width': self.width,
+            'height': self.height,
+            'map_data': self.map_data,  # stringified JSON
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
 
 # ★ NPC 모델
 class NPC(db.Model):
