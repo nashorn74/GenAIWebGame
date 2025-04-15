@@ -88,16 +88,27 @@ if __name__ == '__main__':
         # 1) NPC 시드
         if NPC.query.count() == 0:
             seed_npcs = [
-                NPC(name='Marina Field',   gender='Female', race='Human', job='Guard', map_key='city2', x=1400, y=600, dialog='Greenfield를 지키는 경비입니다. 반갑습니다!'),
-                NPC(name='Iris Gale',      gender='Female', race='Elf',   job='Guard', map_key='city2', x=1300, y=700, dialog='Greenfield를 지키는 경비입니다. 반갑습니다!'),
-                NPC(name='Holt Bram',      gender='Male',   race='Human', job='Guard', map_key='city2', x=1350, y=750, dialog='Greenfield를 지키는 경비입니다. 반갑습니다!'),
-                NPC(name='Flora Plain',    gender='Female', race='Human', job='Farmer', map_key='city2', x=1600, y=820, dialog='곡물을 재배하고 있어요. 도와주실래요?'),
-                NPC(name='Roderick Hay',   gender='Male',   race='Human', job='Stable Master', map_key='city2', x=1650, y=880, dialog='안녕하세요!'),
-                NPC(name='Colette Water',  gender='Female', race='Elf',   job='Well Keeper', map_key='city2', x=1500, y=1000, dialog='안녕하세요!'),
-                NPC(name='Rose Malt',      gender='Female', race='Human', job='Innkeeper', map_key='city2', x=1670, y=1200, dialog='안녕하세요!'),
-                NPC(name='Evelyn Sprout',  gender='Female', race='Human', job='Crop Researcher', map_key='city2', x=1800, y=980, dialog='안녕하세요!'),
-                NPC(name='Tessa Bloom',    gender='Female', race='Human', job='Flower Vendor', map_key='city2', x=1850, y=760, dialog='안녕하세요!'),
-                NPC(name='Garrett Leaf',   gender='Male',   race='Human', job='Traveling Merchant', map_key='city2', x=1100, y=650, dialog='안녕하세요!'),
+                NPC(name='Marina Field', gender='Female', race='Human', job='Guard', map_key='city2',
+                    x=1400, y=600, dialog='Greenfield를 지키는 경비입니다. 반갑습니다!', npc_type='normal'),
+                NPC(name='Iris Gale', gender='Female', race='Elf', job='Guard', map_key='city2',
+                    x=1300, y=700, dialog='Greenfield를 지키는 경비입니다. 반갑습니다!', npc_type='normal'),
+                NPC(name='Holt Bram', gender='Male', race='Human', job='Guard', map_key='city2',
+                    x=1350, y=750, dialog='Greenfield를 지키는 경비입니다. 반갑습니다!', npc_type='normal'),
+                NPC(name='Flora Plain', gender='Female', race='Human', job='Farmer', map_key='city2',
+                    x=1600, y=820, dialog='곡물을 재배하고 있어요. 도와주실래요?', npc_type='normal'),
+                NPC(name='Roderick Hay', gender='Male', race='Human', job='Stable Master', map_key='city2',
+                    x=1650, y=880, dialog='안녕하세요!', npc_type='normal'),
+                NPC(name='Colette Water', gender='Female', race='Elf', job='Well Keeper', map_key='city2',
+                    x=1500, y=1000, dialog='안녕하세요!', npc_type='normal'),
+                NPC(name='Rose Malt', gender='Female', race='Human', job='Innkeeper', map_key='city2',
+                    x=1670, y=1200, dialog='안녕하세요!', npc_type='normal'),
+                NPC(name='Evelyn Sprout', gender='Female', race='Human', job='Crop Researcher', map_key='city2',
+                    x=1800, y=980, dialog='안녕하세요!', npc_type='normal'),
+                NPC(name='Tessa Bloom', gender='Female', race='Human', job='Flower Vendor', map_key='city2',
+                    x=1850, y=760, dialog='안녕하세요!', npc_type='normal'),
+                # 10번째 → shop
+                NPC(name='Garrett Leaf', gender='Male', race='Human', job='Traveling Merchant', map_key='city2',
+                    x=1100, y=650, dialog='안녕하세요! 물건을 구경해 보실래요?', npc_type='shop')
             ]
             db.session.bulk_save_objects(seed_npcs)
             db.session.commit()

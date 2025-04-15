@@ -237,6 +237,9 @@ class NPC(db.Model):
     # 간단한 대사 (더 복잡한 스크립트는 별도 DB나 JSON으로 확장)
     dialog = db.Column(db.Text, default='안녕하세요!')
 
+    # ★추가: NPC 유형 (normal, shop, quest, etc.)
+    npc_type = db.Column(db.String(20), default='normal')
+
     # 활성/비활성, 생성일시
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -252,6 +255,7 @@ class NPC(db.Model):
             'x': self.x,
             'y': self.y,
             'dialog': self.dialog,
+            'npc_type': self.npc_type,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

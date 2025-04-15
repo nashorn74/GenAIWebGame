@@ -62,7 +62,9 @@ def create_npc():
         map_key=data.get('map_key', 'city2'),
         x=data.get('x', 0),
         y=data.get('y', 0),
-        dialog=data.get('dialog', '안녕하세요!')
+        dialog=data.get('dialog', '안녕하세요!'),
+        is_active=bool(data.get('is_active', True)),
+        npc_type=data.get('npc_type', 'normal')
     )
     db.session.add(npc)
     db.session.commit()
@@ -87,6 +89,8 @@ def update_npc(npc_id):
     # 활성/비활성
     if 'is_active' in data:
         npc.is_active = bool(data['is_active'])
+    if 'npc_type' in data:
+        npc.npc_type = data['npc_type']
 
     db.session.commit()
     return jsonify({'message': 'NPC updated', 'npc': npc.to_dict()})
