@@ -1,9 +1,11 @@
 from flask import Flask
+from flask_cors import CORS
 from config import Config
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from models import db, Character, NPC, Item
 from routes import bp as api_bp
 from auth import auth_bp
+from auth_admin import admin_auth_bp
 from characters import characters_bp
 from npcs import npcs_bp
 from items import items_bp
@@ -15,6 +17,8 @@ def create_app():
 
     db.init_app(app)
     socketio = SocketIO(app)
+
+    CORS(app)
 
     @socketio.on('join_map')
     def handle_join_map(data):
@@ -63,6 +67,7 @@ def create_app():
     app.register_blueprint(npcs_bp, url_prefix='/api')
     app.register_blueprint(items_bp, url_prefix='/api')
     app.register_blueprint(shop_bp, url_prefix='/api')
+    app.register_blueprint(admin_auth_bp, url_prefix='/auth')  # /auth/admin_login
 
     @app.route('/')
     def index():

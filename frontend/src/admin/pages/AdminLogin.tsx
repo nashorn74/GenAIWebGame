@@ -10,13 +10,32 @@ export default function AdminLogin() {
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState('')  // 에러 메시지 상태
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: call real /api/admin/login
-    // if success from server, set auth
-    setAdminAuthenticated(true)  // localStorage 저장
-    navigate('/admin/users')     // 이동
+    setError('')  // 초기화
+
+    try {
+      const res = await fetch('http://localhost:5000/auth/admin_login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })
+      if (!res.ok) {
+        // 로그인 실패 (401 등)
+        const data = await res.json()
+        setError(data.error || 'Login failed')
+        return
+      }
+
+      // 성공(200)
+      setAdminAuthenticated(true) // localStorage 저장
+      navigate('/admin/users')    // 이동
+    } catch (err) {
+      console.error(err)
+      setError('Network error or server not responding')
+    }
   }
 
   return (
@@ -39,6 +58,13 @@ export default function AdminLogin() {
             fullWidth
             margin="normal"
           />
+
+          {error && (
+            <Typography color="error" sx={{ mt: 1 }}>
+              {error}
+            </Typography>
+          )}
+
           <Button type="submit" variant="contained" fullWidth sx={{ mt: 2 }}>
             Login
           </Button>
