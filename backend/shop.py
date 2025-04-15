@@ -22,9 +22,10 @@ def buy_item(npc_id):
 
     # 1) NPC 확인
     npc = NPC.query.get_or_404(npc_id)
-    # 예: npc.name="Garrett Leaf", npc.job="Traveling Merchant", npc.map_key="city2"
-    if npc.job != "Traveling Merchant" or npc.map_key != "city2":
-        return jsonify({'error': 'This NPC is not a traveling merchant in Greenfield'}), 400
+    if npc.npc_type != 'shop':
+        return jsonify({'error': 'This NPC is not a shop NPC'}), 400
+    if not npc.is_active:
+        return jsonify({'error': 'NPC is not active'}), 400
 
     # 2) 캐릭터 / 아이템 확인
     char = Character.query.get_or_404(char_id)
@@ -74,8 +75,10 @@ def sell_item(npc_id):
 
     # 1) NPC 확인
     npc = NPC.query.get_or_404(npc_id)
-    if npc.job != "Traveling Merchant" or npc.map_key != "city2":
-        return jsonify({'error': 'This NPC is not a traveling merchant in Greenfield'}), 400
+    if npc.npc_type != 'shop':
+        return jsonify({'error': 'This NPC is not a shop NPC'}), 400
+    if not npc.is_active:
+        return jsonify({'error': 'NPC is not active'}), 400
 
     # 2) 캐릭터 / 아이템
     char = Character.query.get_or_404(char_id)
