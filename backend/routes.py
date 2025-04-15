@@ -53,3 +53,29 @@ def delete_user(user_id):
     db.session.delete(user)
     db.session.commit()
     return jsonify({'message': 'User deleted'})
+
+@bp.route('/users/<int:user_id>/ban', methods=['POST'])
+def ban_user(user_id):
+    """
+    유저 정지: status='banned'
+    """
+    user = User.query.get_or_404(user_id)
+    if user.status == 'banned':
+        return jsonify({'error': 'User is already banned'}), 400
+
+    user.status = 'banned'
+    db.session.commit()
+    return jsonify({'message': f'User {user.username} is now banned', 'status': user.status}), 200
+
+@bp.route('/users/<int:user_id>/unban', methods=['POST'])
+def unban_user(user_id):
+    """
+    유저 정지 해제: status='active'
+    """
+    user = User.query.get_or_404(user_id)
+    if user.status != 'banned':
+        return jsonify({'error': 'User is not banned'}), 400
+
+    user.status = 'active'
+    db.session.commit()
+    return jsonify({'message': f'User {user.username} is now unbanned', 'status': user.status}), 200

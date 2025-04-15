@@ -1,3 +1,4 @@
+# models.py
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
@@ -14,6 +15,9 @@ class User(db.Model):
 
     # ★ 비밀번호 해시용 칼럼 추가
     password_hash = db.Column(db.String(255), nullable=True)
+
+    # ★ status 칼럼 추가 ('active', 'banned', 'withdrawn' 등 사용)
+    status = db.Column(db.String(20), default='active')
 
     # user가 가진 캐릭터들
     characters = db.relationship('Character', backref='user', lazy=True)
@@ -39,7 +43,7 @@ class User(db.Model):
             'username': self.username,
             'email': self.email,
             'bio': self.bio,
-            # 보안상 password_hash는 내려주지 않음
+            'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 

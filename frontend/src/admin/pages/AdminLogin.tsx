@@ -6,6 +6,8 @@ import {
   Box, TextField, Button, Typography, Paper
 } from '@mui/material'
 
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+
 export default function AdminLogin() {
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
@@ -17,7 +19,7 @@ export default function AdminLogin() {
     setError('')  // 초기화
 
     try {
-      const res = await fetch('http://localhost:5000/auth/admin_login', {
+      const res = await fetch(`${BASE_URL}/auth/admin_login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
