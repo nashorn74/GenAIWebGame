@@ -1,10 +1,13 @@
-//src/App.tsx
+// src/App.tsx
 import React from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import PhaserGame from './PhaserGame'
 import AdminLayout from './admin/AdminLayout'
 import AdminLogin from './admin/pages/AdminLogin'
 import AdminUsers from './admin/pages/AdminUsers'
+
+// PrivateRoute
+import PrivateRoute from './admin/PrivateRoute'
 
 export default function App() {
   return (
@@ -15,12 +18,19 @@ export default function App() {
 
         {/* /admin 영역 */}
         <Route path="/admin" element={<AdminLayout />}>
-          {/* 예: /admin/login /admin/register 등은 "로그인 전" 페이지이므로 별도 구조도 가능 */}
+          {/* 로그인 페이지 (권한 없이 접근 가능) */}
           <Route path="login" element={<AdminLogin />} />
 
-          {/* 관리자 페이지 목록 - 로그인 후 접근 가능 */}
-          {/* 실제로는 권한체크(PrivateRoute)도 필요 */}
-          <Route path="users" element={<AdminUsers />} />
+          {/* 권한 필요한 관리자 페이지 */}
+          <Route
+            path="users"
+            element={
+              <PrivateRoute>
+                <AdminUsers />
+              </PrivateRoute>
+            }
+          />
+          {/* 여기에 characters, maps, npcs, items 등도 추가 가능 */}
         </Route>
       </Routes>
     </BrowserRouter>

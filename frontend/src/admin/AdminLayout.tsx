@@ -1,26 +1,55 @@
-//src/admin/AdminLayout.tsx
+// src/admin/AdminLayout.tsx
 import React from 'react'
-import { Outlet, Link } from 'react-router-dom'
+import { Outlet, Link, useLocation } from 'react-router-dom'
+import { Box, Drawer, List, ListItemButton, ListItemText, Toolbar, AppBar, Typography } from '@mui/material'
 
 export default function AdminLayout() {
-  return (
-    <div style={{ display: 'flex' }}>
-      {/* 좌측 사이드바 */}
-      <nav style={{ width: '200px', background: '#eee' }}>
-        <h2>Admin Menu</h2>
-        <ul>
-          <li><Link to="/admin/users">User Management</Link></li>
-          <li><Link to="/admin/characters">Character Management</Link></li>
-          <li><Link to="/admin/maps">Map Management</Link></li>
-          <li><Link to="/admin/npcs">NPC Management</Link></li>
-          <li><Link to="/admin/items">Item Management</Link></li>
-        </ul>
-      </nav>
+  const location = useLocation()
 
-      {/* 우측 메인 영역 */}
-      <main style={{ flex: 1, padding: '20px' }}>
+  const menuItems = [
+    { label: 'User Management', path: '/admin/users' },
+    { label: 'Character Management', path: '/admin/characters' },
+    { label: 'Map Management', path: '/admin/maps' },
+    { label: 'NPC Management', path: '/admin/npcs' },
+    { label: 'Item Management', path: '/admin/items' },
+  ]
+
+  return (
+    <Box sx={{ display: 'flex' }}>
+      {/* 상단 AppBar */}
+      <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+        <Toolbar>
+          <Typography variant="h6" noWrap component="div">
+            Admin Panel
+          </Typography>
+        </Toolbar>
+      </AppBar>
+
+      {/* 왼쪽 Drawer (사이드바) */}
+      <Drawer
+        variant="permanent"
+        sx={{
+          width: 240,
+          [`& .MuiDrawer-paper`]: { width: 240, boxSizing: 'border-box' },
+        }}
+      >
+        <Toolbar /> {/* to push content below AppBar */}
+        <List>
+          {menuItems.map((item) => (
+            <Link key={item.path} to={item.path} style={{ textDecoration: 'none' }}>
+              <ListItemButton selected={location.pathname === item.path}>
+                <ListItemText primary={item.label} />
+              </ListItemButton>
+            </Link>
+          ))}
+        </List>
+      </Drawer>
+
+      {/* 우측 메인 컨테이너 */}
+      <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
+        <Toolbar /> {/* AppBar height spacer */}
         <Outlet />
-      </main>
-    </div>
+      </Box>
+    </Box>
   )
 }
