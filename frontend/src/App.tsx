@@ -1,7 +1,8 @@
 // src/App.tsx
 import React from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import PhaserGame from './PhaserGame'
+import LoginPage from './pages/LoginPage'
 import AdminLayout from './admin/AdminLayout'
 import AdminLogin from './admin/pages/AdminLogin'
 import AdminUsers from './admin/pages/AdminUsers'
@@ -13,12 +14,22 @@ import AdminMaps from './admin/pages/AdminMaps'
 import AdminNPCs from './admin/pages/AdminNPCs'
 import AdminItems from './admin/pages/AdminItems'
 
+const isLoggedIn = () => !!localStorage.getItem('arkacia_token')
+
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* 기존 게임 화면 */}
-        <Route path="/" element={<PhaserGame />} />
+        {/* 플레이어용 로그인 */}
+        <Route path="/login" element={<LoginPage />} />
+
+        {/* 게임 화면 – 로그인 필요 */}
+        <Route
+          path="/"
+          element={
+            isLoggedIn() ? <PhaserGame /> : <Navigate to="/login" replace />
+          }
+        />
 
         {/* /admin 영역 */}
         <Route path="/admin" element={<AdminLayout />}>
