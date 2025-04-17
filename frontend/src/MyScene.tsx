@@ -180,7 +180,7 @@ export class MyScene extends Phaser.Scene {
       (tileX + 0.5) * map.tileWidth,
       (tileY + 0.5) * map.tileHeight
     )
-    this.events.emit('mapKey', mapKey)
+    this.events.emit('mapKey', mapMeta.display_name)
 
     /* ─ NPC 로드 & 배치 ─ */
     await this.spawnNpcs(mapKey)

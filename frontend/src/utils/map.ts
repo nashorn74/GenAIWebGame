@@ -6,6 +6,7 @@ export interface MapTeleport{
   }
   export interface MapDTO{
     key:string
+    display_name:string
     tile_width:number
     tile_height:number
     start_position:[number,number]     // ★

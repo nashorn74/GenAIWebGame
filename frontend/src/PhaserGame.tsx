@@ -12,6 +12,8 @@ import Phaser from 'phaser'
 import { MyScene } from './MyScene'
 import MenuPopover  from './ui/MenuPopover'
 import NpcDialog    from './ui/NpcDialog'
+import ShopDialog   from './ui/ShopDialog'
+import InventoryDialog from './ui/InventoryDialog'
 
 import {
   getSelectedCharId,
@@ -40,6 +42,14 @@ export default function PhaserGame() {
   const [coords , setCoords ] = useState({ x: 0, y: 0 })
   const [char   , setChar   ] = useState<CharacterDTO>()
   const [talkNpc, setTalkNpc] = useState<NpcDTO|null>(null)
+  const [shopNpc , setShopNpc ] = useState<NpcDTO|null>(null)
+  const [invOpen , setInvOpen ] = useState(false)
+
+  const refreshChar = ()=> {
+    if(char) fetchCharacter(char.id).then(setChar)
+  }
+
+  /* 상점 다이얼로그 ↓ 에서 거래 성공 후 캐릭터 골드 새로 고침 */
 
   /* ────── MUI theme (PhaserGame 전용) ────── */
   const theme = useMemo(() => createTheme({
@@ -165,13 +175,11 @@ export default function PhaserGame() {
             gap     : 12,
           }}
         >
-          {/* 인벤토리(미구현) */}
+           {/* 인벤토리 버튼 */}
           <button
-            disabled
+            onClick={()=>setInvOpen(true)}
             style={{ width: 42, height: 42, border: 'none', borderRadius: 4 }}
-          >
-            🎒
-          </button>
+          >🎒</button>
 
           <MenuPopover
             bgmOn={bgmOn}
@@ -188,7 +196,27 @@ export default function PhaserGame() {
             /* ── Scene 쿨다운 알림 ── */
             gameRef.current?.events.emit('npcDialogClosed')
           }}
-          onOpenShop={n => console.log('TODO - open shop UI for', n.name)}
+          onOpenShop={n => { setTalkNpc(null); setShopNpc(n) }}
+        />
+
+        {/* ─── 상점 ─── */}
+        <ShopDialog
+          npc={shopNpc}
+          charId={char?.id!}
+          charGold={char?.gold ?? 0}   // ★ 현재 골드 전달
+          onClose={() => {
+            setShopNpc(null)
+            /* ── Scene 쿨다운 알림 ── */
+            gameRef.current?.events.emit('npcDialogClosed')
+          }}
+          onAfterTrade={refreshChar}
+        />
+
+        {/* ─── 인벤토리 ─── */}
+        <InventoryDialog
+          open={invOpen}
+          charId={char?.id!}
+          onClose={()=>setInvOpen(false)}
         />
       </div>
     </ThemeProvider>

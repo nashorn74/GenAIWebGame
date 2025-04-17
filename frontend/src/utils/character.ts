@@ -2,6 +2,7 @@
 export interface CharacterDTO{
     id:number; user_id:number; name:string; level:number; job:string;
     hp:number; max_hp:number; mp:number; max_mp:number;
+    gold: number;
     /* 필요 시 다른 필드도… */
   }
   
