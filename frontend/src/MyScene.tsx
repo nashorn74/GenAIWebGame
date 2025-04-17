@@ -1,235 +1,295 @@
 import Phaser from 'phaser'
 import { MapTeleport, fetchMapData } from './utils/map'
+import { fetchNpcs, NpcDTO } from './utils/npc'
 
 type MapKey = 'worldmap' | 'city2' | 'dungeon1'
+const TALK_DIST   = 48   // 대화 시작
+const RESET_DIST  = 64   // 다시 대화 가능해지는 거리
 
 export class MyScene extends Phaser.Scene {
+  /* ▽▽ 필드 ▽▽ */
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private player!: Phaser.Physics.Arcade.Sprite
 
-  private currentMap!: MapKey
   private tilemap?: Phaser.Tilemaps.Tilemap
-  private layer?: Phaser.Tilemaps.TilemapLayer
-  // ★ 기존 collider를 저장
+  private layer?  : Phaser.Tilemaps.TilemapLayer
   private playerCollider?: Phaser.Physics.Arcade.Collider
-  private bgm?: Phaser.Sound.BaseSound
-  private teleports:MapTeleport[] = []
-  private miniCam!: Phaser.Cameras.Scene2D.Camera;   // ← 미니맵 카메라 참조 추가
 
-  constructor() {
-    super('my-scene')
-  }
+  private teleports: MapTeleport[] = []
+  private miniCam!: Phaser.Cameras.Scene2D.Camera
+
+  private npcGroup!: Phaser.GameObjects.Group
+  private npcsMeta: NpcDTO[] = []
+
+  private bgm?: Phaser.Sound.BaseSound
+  private interactingNpcId = 0   // 중복 대화 방지
+  private closeDialogNpc = false
+
+  /* ▽▽ SETUP ▽▽ */
+  constructor() { super('my-scene') }
 
   preload() {
-    // worldmap
+    /* --- 맵 & 플레이어 --- */
     this.load.tilemapTiledJSON('worldmap', 'worldmap.json')
-    this.load.image('worldmap_tileset', 'tmw_grass_spacing.png')
-
-    // city2
-    this.load.tilemapTiledJSON('city2', 'city2.json')
-    this.load.image('city_tileset', 'tmw_city_spacing.png')
-
-    // dungeon1
+    this.load.tilemapTiledJSON('city2'   , 'city2.json')
     this.load.tilemapTiledJSON('dungeon1', 'dungeon1.json')
+
+    this.load.image('worldmap_tileset', 'tmw_grass_spacing.png')
+    this.load.image('city_tileset'   , 'tmw_city_spacing.png')
     this.load.image('dungeon_tileset', 'tmw_dungeon_spacing.png')
 
-    // 캐릭터
-    this.load.image('char_stand1', 'char1_stand1.png')
-    this.load.image('char_stand2', 'char1_stand2.png')
-    this.load.image('char_walk1', 'char1_walk1.png')
-    this.load.image('char_walk2', 'char1_walk2.png')
+    this.load.image('char_stand1','char1_stand1.png')
+    this.load.image('char_stand2','char1_stand2.png')
+    this.load.image('char_walk1' ,'char1_walk1.png')
+    this.load.image('char_walk2' ,'char1_walk2.png')
 
-    // BGM – public 폴더 기준 경로(예: /assets/wandering_through_enchantment.mp3)
-    this.load.audio('wandering_through_enchantment', 'assets/wandering_through_enchantment.mp3')
-  }
-
-  /** 사용자 입력이 있어야만 재생할 수 있을 때를 처리 */
-  private playBgmSafe() {
-    if (!this.bgm) return
-
-    if (this.sound.locked) {
-      // 아직 ‘락’ 상태 → 첫 pointerdown/keydown 을 기다렸다가 재생
-      this.sound.once(Phaser.Sound.Events.UNLOCKED, () => this.bgm!.play())
-    } else {
-      // 이미 재생 가능한 상태
-      this.bgm.play()
+    /* --- NPC 스프라이트(stand 2컷) --- */
+    for (let i = 1; i <= 10; i++) {
+      const id = i.toString()
+      this.load.image(`npc${id}_1`, `assets/npc${id}_stand1.png`)
+      this.load.image(`npc${id}_2`, `assets/npc${id}_stand2.png`)
     }
+
+    /* --- BGM --- */
+    this.load.audio(
+      'wandering_bgm',
+      'assets/wandering_through_enchantment.mp3'
+    )
   }
 
+  /* ▽▽ CREATE ▽▽ */
   async create() {
-    /* ① player를 먼저 만든 다음 minimap 카메라 follow -------------------------------- */
-    this.player = this.physics.add.sprite(0,0,'char_stand1')
+    /* 플레이어 & 키보드 */
+    this.player = this.physics.add.sprite(0, 0, 'char_stand1')
     this.player.setCollideWorldBounds(true)
+    this.cursors = this.input.keyboard!.createCursorKeys()
 
+    /* 미니맵 카메라 */
     this.miniCam = this.cameras.add(
-      this.scale.width - 190,   // **this.scale.width** 로 대체
+      this.scale.width - 190,
       60,
       180,
       180,
       false,
       'mini'
-    );
-    this.miniCam.setZoom(0.12).startFollow(this.player);
+    )
+    this.miniCam.setZoom(0.12).startFollow(this.player)
 
-    /* BGM ---------------------------------------------------------------- */
-    this.bgm = this.sound.add('wandering_through_enchantment',
-      { loop: true, volume: 0.5 })
-    this.playBgmSafe()
-
-    // React → BGM 토글
-    this.game.events.on('toggleBgm',()=>{
-      if(this.bgm?.isPlaying) this.bgm.pause()
-      else                    this.bgm?.resume()
+    /* BGM (사용자 상호작용 unlock 고려) */
+    this.bgm = this.sound.add('wandering_bgm', { loop: true, volume: 0.5 })
+    if (this.sound.locked) {
+      this.sound.once(Phaser.Sound.Events.UNLOCKED, () => this.bgm!.play())
+    } else {
+      this.bgm.play()
+    }
+    this.game.events.on('toggleBgm', () => {
+      if (this.bgm?.isPlaying) this.bgm.pause()
+      else this.bgm?.resume()
       this.events.emit('bgmState', !this.bgm?.isPaused)
     })
+    /* React 가 ‘닫기’ 눌렀을 때 호출됨 */
+    this.game.events.on('npcDialogClosed', () => {
+      // 음수로 두면 update() 안에서 ‘멀어질 때까지 대화금지’ 상태
+      console.log('npcDialogClosed')
+      this.closeDialogNpc = true
+    })
 
-    // 애니메이션
+    /* 스탠드/워크 애니메이션 */
     this.anims.create({
       key: 'stand',
       frames: [{ key: 'char_stand1' }, { key: 'char_stand2' }],
       frameRate: 2,
-      repeat: -1
+      repeat: -1,
     })
     this.anims.create({
       key: 'walk',
       frames: [{ key: 'char_walk1' }, { key: 'char_walk2' }],
       frameRate: 4,
-      repeat: -1
+      repeat: -1,
     })
 
-    this.cursors = this.input.keyboard!.createCursorKeys()
+    for (let i = 1; i <= 10; i++) {
+      const id = i.toString()           // 1 ~ 10
+      this.anims.create({
+        key       : `npc${id}_idle`,    // 예: npc1_idle
+        frames    : [
+          { key: `npc${id}_1` },
+          { key: `npc${id}_2` },
+        ],
+        frameRate : 2,
+        repeat    : -1,
+      })
+    }
 
-    /* ③ 맵 데이터를 먼저 받아서 start_position 사용 ------------------------------- */
+    /* 시작 맵 & 위치 */
     const worldInfo = await fetchMapData('worldmap')
-    const [sx,sy]  = worldInfo.start_position      // 6,12
+    await this.loadMap('worldmap', ...worldInfo.start_position)
 
-    await this.loadMap('worldmap', sx, sy)         // <-- 맵/플레이어 세팅
-
-    this.scale.on(Phaser.Scale.Events.RESIZE, (gameSize: Phaser.Structs.Size) => {
-      const { width /*, height */ } = gameSize;      // height 가 필요하면 같이 사용
-      this.miniCam.setPosition(width - 190, 60);     // X 좌표만 다시 계산
-    });
+    /* 브라우저 resize 대응 → 미니맵 위치 조정 */
+    this.scale.on(Phaser.Scale.Events.RESIZE, (s) =>
+      this.miniCam.setPosition(s.width - 190, 60)
+    )
   }
 
-  /* ───────── 맵 로드 ───────── */
-  private async loadMap(mapKey:MapKey, tileX:number,tileY:number){
-    // ★ 1) 이전 collider 제거
-    if (this.playerCollider) {
-      this.playerCollider.destroy()
-      this.playerCollider = undefined
+  /* ▽▽ 맵 로드 ▽▽ */
+  private async loadMap(mapKey: MapKey, tileX: number, tileY: number) {
+    /* ─ 이전 리소스 정리 ─ */
+    this.playerCollider?.destroy()
+    this.layer?.destroy()
+    if (this.npcGroup) {
+      this.npcGroup.children.each(o => {
+        (o.getData('label') as Phaser.GameObjects.Text)?.destroy()
+        o.destroy()                          // 스프라이트 + 물리바디 제거
+      })
+      this.npcGroup?.clear(true,true)                 // 그룹 비우기
     }
 
-    // ★ 이전 layer 제거
-    if (this.layer) {
-      this.layer.destroy()
-      this.layer = undefined
-    }
-
-    // tilemap 생성
+    /* ─ 타일맵 ─ */
     const map = this.make.tilemap({ key: mapKey })
+    const tilesetKey =
+      mapKey === 'worldmap'
+        ? 'worldmap_tileset'
+        : mapKey === 'city2'
+        ? 'city_tileset'
+        : 'dungeon_tileset'
 
-    // mapKey 에 따라 Tileset name, 이미지 키 다름
-    let tilesetName = ''
-    if (mapKey === 'worldmap') {
-      tilesetName = 'worldmap_tileset'
-    } else if (mapKey === 'city2') {
-      tilesetName = 'city_tileset'
-    } else if (mapKey === 'dungeon1') {
-      tilesetName = 'dungeon_tileset'
-    }
-
-    const tileset = map.addTilesetImage(tilesetName, tilesetName, 128, 128, 1, 1)
-    if (!tileset) {
-      throw new Error(`Tileset not found: ${tilesetName}`)
-    }
-
-    const layer = map.createLayer('Tile Layer 1', tileset, 0, 0)
-    if (!layer) {
-      throw new Error(`Layer "Tile Layer 1" not found`)
-    }
-
+    const ts = map.addTilesetImage(tilesetKey, tilesetKey, 128, 128, 1, 1)!
+    const layer = map.createLayer('Tile Layer 1', ts, 0, 0)!
     layer.setCollisionByProperty({ collides: true })
 
-    // ★ 2) 새 collider 생성
-    this.playerCollider = this.physics.add.collider(this.player, layer)
-
-    // 맵/레이어 참조 저장
     this.tilemap = map
-    this.layer = layer
-    this.currentMap = mapKey
+    this.layer   = layer
 
-    // 카메라 & 물리영역
+    this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.cameras.main.startFollow(this.player, true)
 
-    this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
-    this.player.setCollideWorldBounds(true)
-
-    // ★ 3) Depth 설정 (레이어가 뒤, 캐릭터가 앞)
+    this.playerCollider = this.physics.add.collider(this.player, layer)
     layer.setDepth(0)
     this.player.setDepth(1)
 
-    /* ---- 맵 JSON 정보 읽기 ---------------------------------------------------- */
-    const mapInfo  = await fetchMapData(mapKey)
-    this.teleports = mapInfo.teleports
+    /* ─ 맵‑메타(포탈) ─ */
+    const mapMeta = await fetchMapData(mapKey)
+    this.teleports = mapMeta.teleports
 
-    /* minimap 카메라 bounds 갱신 */
-    this.miniCam.setBounds(0,0,map.widthInPixels,map.heightInPixels)
+    /* ─ 미니맵 bounds ─ */
+    this.miniCam.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
 
-    /* 플레이어 위치 설정 -------------------------------------------------------- */
-    const px = (tileX+0.5)*map.tileWidth
-    const py = (tileY+0.5)*map.tileHeight
-    this.player.setPosition(px,py)
+    /* ─ 플레이어 위치 ─ */
+    this.player.setPosition(
+      (tileX + 0.5) * map.tileWidth,
+      (tileY + 0.5) * map.tileHeight
+    )
+    this.events.emit('mapKey', mapKey)
 
-    /* 메인 카메라는 loadMap 마지막에 다시 follow (첫 loadMap 도 포함) --------- */
-    this.cameras.main.startFollow(this.player,true)
-
-    this.events.emit('coords',{
-      x: tileX,
-      y: tileY
-    })
+    /* ─ NPC 로드 & 배치 ─ */
+    await this.spawnNpcs(mapKey)
   }
 
+  /* ▽▽ NPC 로드 / 스폰 ▽▽ */
+  private async spawnNpcs(mapKey: MapKey) {
+    if(!this.tilemap) return
+    this.npcGroup = this.add.group()
+    this.npcsMeta = await fetchNpcs(mapKey)
+
+    for(const m of this.npcsMeta){
+      /* 애니메이션 (한 번만 생성) */
+      const aKey = `npc${m.id}_idle`
+
+      /* 스프라이트 */
+      const npc = this.physics.add
+        .sprite((m.x+0.5)*this.tilemap!.tileWidth,
+                (m.y+0.5)*this.tilemap!.tileHeight,
+                `npc${m.id}_1`)
+        .setImmovable(true)
+        .setDepth(1)
+        .play(aKey)
+
+      /* 머리위 라벨 */
+      const lbl = this.add.text(
+        npc.x,
+        npc.y - 68,
+        m.npc_type==='shop'?'상점':'대화',
+        {fontSize:'14px',color:'#fff',stroke:'#000',strokeThickness:3})
+      .setOrigin(0.5)
+      .setDepth(2)
+
+      npc.setData('label', lbl)        // 나중에 파괴용
+      
+      /* 애니메이션 가동 */
+      npc.anims.play(aKey)
+
+      this.npcGroup.add(npc)
+    }
+  }
+
+  /* ▽▽ UPDATE ▽▽ */
   update() {
-    if (!this.cursors) return   // ← create 가 중단됐을 때 대비
-
+    /* ─ 플레이어 이동 ─ */
     const speed = 200
-    let vx = 0
-    let vy = 0
-
-    if (this.cursors.left?.isDown) vx = -speed
-    else if (this.cursors.right?.isDown) vx = speed
-
-    if (this.cursors.up?.isDown) vy = -speed
-    else if (this.cursors.down?.isDown) vy = speed
-
+    const vx = (this.cursors.left?.isDown ? -1 : this.cursors.right?.isDown ? 1 : 0) * speed
+    const vy = (this.cursors.up?.isDown ? -1 : this.cursors.down?.isDown ? 1 : 0) * speed
     this.player.setVelocity(vx, vy)
 
-    if (vx !== 0 || vy !== 0) {
-      this.player.play('walk', true)
-    } else {
-      this.player.play('stand', true)
-    }
+    this.player.play(vx || vy ? 'walk' : 'stand', true)
 
     if (!this.tilemap) return
 
-    /* 좌표 React 전달 ---------------------------------------------------- */
-    const tX=Math.floor(this.player.x/this.tilemap!.tileWidth)
-    const tY=Math.floor(this.player.y/this.tilemap!.tileHeight)
-    this.events.emit('coords',{x:tX,y:tY})
+    /* ─ 좌표 HUD ─ */
+    const tx = Math.floor(this.player.x / this.tilemap.tileWidth)
+    const ty = Math.floor(this.player.y / this.tilemap.tileHeight)
+    this.events.emit('coords', { x: tx, y: ty })
 
-    /* ★ NEW – 서버 teleports 로 맵 이동 ------------------------------- */
-    for(const tp of this.teleports){
-      // from: {x, y}  또는  {y, xRange:[a,b]}
-      const cond = ('x' in tp.from)
-        ? (tp.from.x===tX && tp.from.y===tY)
-        : (tY===tp.from.y && tX>=tp.from.xRange[0] && tX<=tp.from.xRange[1])
+    /* ─ 포탈 체크 ─ */
+    for (const tp of this.teleports) {
+      const hit =
+        'x' in tp.from
+          ? tp.from.x === tx && tp.from.y === ty
+          : tp.from.y === ty &&
+            tx >= tp.from.xRange[0] &&
+            tx <= tp.from.xRange[1]
 
-      if(cond){
-        const [nx,ny] = tp.to_position
+      if (hit) {
+        const [nx, ny] = tp.to_position
         this.loadMap(tp.to_map as MapKey, nx, ny)
-        break
+        return
       }
     }
+
+    /* ─ NPC 대화 트리거 (32px 이내) ─ */
+    this.npcGroup?.children.iterate((obj) => {
+      const npc = obj as Phaser.GameObjects.Sprite
+      const dist = Phaser.Math.Distance.Between(
+        this.player.x,
+        this.player.y,
+        npc.x,
+        npc.y
+      )
+      if (dist < TALK_DIST && this.interactingNpcId == 0 && this.closeDialogNpc == false) {   // ★
+        const meta = this.npcsMeta.find(
+          (n) =>
+            n.x === Math.floor(npc.x / this.tilemap!.tileWidth) &&
+            n.y === Math.floor(npc.y / this.tilemap!.tileHeight)
+        )
+        if (meta) {
+          console.log('체크:'+meta.name)
+          this.interactingNpcId = meta.id          // 잠금
+          this.events.emit('openNpcDialog', meta)  // React → NPCDialog
+        }
+      }
+      /* ─ 쿨다운 해제 ─ */
+      if (this.closeDialogNpc && dist > RESET_DIST) {
+        const meta = this.npcsMeta.find(
+          (n) =>
+            n.x === Math.floor(npc.x / this.tilemap!.tileWidth) &&
+            n.y === Math.floor(npc.y / this.tilemap!.tileHeight)
+        )
+        if (meta && meta.id == this.interactingNpcId) {
+          console.log('쿨다운 해제:'+meta.name)
+          this.interactingNpcId = 0                  // 다시 대화 가능
+          this.closeDialogNpc = false
+        }
+      }
+    })
   }
 }
