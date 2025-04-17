@@ -81,7 +81,7 @@ if __name__ == '__main__':
     app, socketio = create_app()
     with app.app_context():
         # ❗ 중요: 기존 테이블 DROP 후 CREATE (개발 환경에서만)
-        db.drop_all()
+        #db.drop_all()
         db.create_all()
 
         # 예: Greenfield NPC들을 DB에 미리 추가 (개발용)

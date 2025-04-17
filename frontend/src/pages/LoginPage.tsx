@@ -29,7 +29,9 @@ export default function LoginPage() {
       }
       // 성공 → 토큰·플래그 저장(프로토타입이라 토큰 대신 flag)
       localStorage.setItem('arkacia_token', 'yes')
-      nav('/', { replace: true })
+      const { user } = await res.json()
+      localStorage.setItem('userId', user.id)
+      nav('/characters', { replace: true })
     } catch {
       setErr('Network error')
     }
