@@ -28,9 +28,9 @@ export default function LoginPage() {
         setErr(e.error || 'Login failed'); return
       }
       // 성공 → 토큰·플래그 저장(프로토타입이라 토큰 대신 flag)
-      localStorage.setItem('arkacia_token', 'yes')
+      sessionStorage.setItem('arkacia_token', 'yes')
       const { user } = await res.json()
-      localStorage.setItem('userId', user.id)
+      sessionStorage.setItem('userId', user.id)
       nav('/characters', { replace: true })
     } catch {
       setErr('Network error')

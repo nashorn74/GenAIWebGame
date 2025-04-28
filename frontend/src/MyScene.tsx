@@ -1,6 +1,8 @@
 import Phaser from 'phaser'
 import { MapTeleport, fetchMapData } from './utils/map'
 import { fetchNpcs, NpcDTO } from './utils/npc'
+import { io, Socket } from 'socket.io-client';
+import { CharacterDTO } from './utils/character'
 
 type MapKey = 'worldmap' | 'city2' | 'dungeon1'
 const TALK_DIST   = 48   // 대화 시작
@@ -8,6 +10,11 @@ const RESET_DIST  = 64   // 다시 대화 가능해지는 거리
 
 export class MyScene extends Phaser.Scene {
   /* ▽▽ 필드 ▽▽ */
+  private socket!: Socket;
+  /** id ➜ (container, nameText) */
+  private actors = new Map<number, Phaser.GameObjects.Container>();
+  private currentMap!: MapKey
+
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private player!: Phaser.Physics.Arcade.Sprite
 
@@ -24,6 +31,9 @@ export class MyScene extends Phaser.Scene {
   private bgm?: Phaser.Sound.BaseSound
   private interactingNpcId = 0   // 중복 대화 방지
   private closeDialogNpc = false
+
+  private isChangingMap = false;         // ★ 전환 중 플래그
+  private meId = Number(sessionStorage.getItem('charId'));
 
   /* ▽▽ SETUP ▽▽ */
   constructor() { super('my-scene') }
@@ -63,6 +73,11 @@ export class MyScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(0, 0, 'char_stand1')
     this.player.setCollideWorldBounds(true)
     this.cursors = this.input.keyboard!.createCursorKeys()
+    /*const me: CharacterDTO = JSON.parse(sessionStorage.getItem('myChar')!);
+    const myLabel = this.add.text(0, -64, me.name,
+      { fontSize:'14px', color:'#fff', stroke:'#000', strokeThickness:3 })
+      .setOrigin(0.5)
+    this.player.add(myLabel)         // sprite → Container 대신 add() 가능*/
 
     /* 미니맵 카메라 */
     this.miniCam = this.cameras.add(
@@ -94,6 +109,55 @@ export class MyScene extends Phaser.Scene {
       this.closeDialogNpc = true
     })
 
+    /* ── ① socket 연결 ── */
+    this.socket = io(import.meta.env.VITE_API_BASE_URL);
+
+    /* socket 연결 직후 – 디버그용 콘솔 */
+
+    // 로그인된 내 캐릭터 id 로 join
+    const myCharId = Number(sessionStorage.getItem('charId'));
+
+    /* 1. URL 확인 */
+    console.log('SOCKET URL =', import.meta.env.VITE_API_BASE_URL)
+
+    /* 2. connect 실패 시 reason 출력 */
+    this.socket.io.on('error',  (err)=>console.error('socket error', err))
+    this.socket.io.on('reconnect_error', console.error)
+    this.socket.io.on('reconnect_failed', console.error)
+
+    /* 3. 연결 후에 join_map 보내는지 확인 */
+    this.socket.on('connect', () => {
+      console.log('[socket] connected id=', this.socket.id)
+    })
+    this.socket.on('disconnect',()=>console.log('[socket] disconnect'))
+
+    /* ───────────────────────────────────────────
+        “actors” Map 은 내 캐릭터도 포함해서 id 로 접근
+        (컨테이너: [bodySprite, nameText])
+    ─────────────────────────────────────────── */
+    /* 현재 방 플레이어 목록 한번에 수신 */
+    this.socket.on('current_players', (arr: CharacterDTO[]) => {
+      arr
+        .filter(c => c.id !== myCharId)     // ★ 내 캐릭터 제거
+        .forEach(c => this.spawnOrUpdateActor(c));
+    });
+
+    /* 새 플레이어 입장 */
+    this.socket.on('player_spawn', (c: CharacterDTO) => {
+      if (c.id !== myCharId) this.spawnOrUpdateActor(c);
+    });
+
+    /* 이동 업데이트 */
+    this.socket.on('player_move', (p:{id:number,x:number,y:number}) => {
+      const cont = this.actors.get(p.id);
+      if (cont) cont.setPosition(p.x, p.y);
+    });
+
+    /* 퇴장 */
+    this.socket.on('player_despawn', ({ id }) => {
+      this.removeActor(id);
+    });
+
     /* 스탠드/워크 애니메이션 */
     this.anims.create({
       key: 'stand',
@@ -121,6 +185,10 @@ export class MyScene extends Phaser.Scene {
       })
     }
 
+    /* 내 캐릭터까지 포함한 컨테이너를 만들어 map 위에 올린다 */
+    const me: CharacterDTO = JSON.parse(sessionStorage.getItem('myChar')!);
+    this.spawnOrUpdateActor(me);               // ← 이름 라벨도 생김
+
     /* 시작 맵 & 위치 */
     const worldInfo = await fetchMapData('worldmap')
     await this.loadMap('worldmap', ...worldInfo.start_position)
@@ -131,8 +199,40 @@ export class MyScene extends Phaser.Scene {
     )
   }
 
+  /* ───────────────── ① create or update ───────────────── */
+  private spawnOrUpdateActor(c: CharacterDTO) {
+    if (c.id === this.meId) return      // ★ 내 컨테이너 생성 금지
+
+    /* 이미 있으면 위치만 갱신 */
+    const existed = this.actors.get(c.id);
+    if (existed) { existed.setPosition(c.x, c.y); return; }
+
+    /* 새로 만든다 : 컨테이너 = [bodySprite, nameText] */
+    const body  = this.add.sprite(0, 0, 'char_stand1');
+    const label = this.add.text(0, -64, c.name,
+      { fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3 }
+    ).setOrigin(0.5);
+
+    const container = this.add.container(c.x, c.y, [body, label]);
+    container.setDepth(1);
+
+    this.actors.set(c.id, container);
+  }
+
+  /* ───────────────── ② 완전 제거 ───────────────── */
+  private removeActor(id: number) {
+    const cont = this.actors.get(id);
+    if (!cont) return;
+    cont.destroy(true);          // 내부 children 도 함께 제거
+    this.actors.delete(id);
+  }  
+
   /* ▽▽ 맵 로드 ▽▽ */
   private async loadMap(mapKey: MapKey, tileX: number, tileY: number) {
+    /* 이미 전환 중이면 무시 */
+    if (this.isChangingMap) return
+    this.isChangingMap = true               // ★ 전환 잠금
+
     /* ─ 이전 리소스 정리 ─ */
     this.playerCollider?.destroy()
     this.layer?.destroy()
@@ -182,8 +282,30 @@ export class MyScene extends Phaser.Scene {
     )
     this.events.emit('mapKey', mapMeta.display_name)
 
+    /* 내 컨테이너는 파괴 후 재생성 → 고스트 방지 */
+    /*this.actors.get(this.meId)?.destroy(true)
+    this.actors.delete(this.meId)
+    const me: CharacterDTO =
+      JSON.parse(sessionStorage.getItem('myChar')!)
+    me.x = this.player.x;  me.y = this.player.y
+    this.spawnOrUpdateActor(me)              // 새 컨테이너*/
+
     /* ─ NPC 로드 & 배치 ─ */
     await this.spawnNpcs(mapKey)
+
+    /* 서버에 방 입장 (맵이 달라질 때만) */
+    if (mapKey !== this.currentMap) {
+      this.socket.emit('join_map', {
+        character_id: this.meId,
+        map_key: mapKey
+      })
+    }
+    this.currentMap = mapKey
+
+    /* 다른 플레이어 전부 제거 → current_players 다시 받을 때만 렌더 */
+    this.actors.forEach((_, id) => this.removeActor(id))
+
+    this.isChangingMap = false              // ★ 잠금 해제
   }
 
   /* ▽▽ NPC 로드 / 스폰 ▽▽ */
@@ -232,6 +354,16 @@ export class MyScene extends Phaser.Scene {
     this.player.setVelocity(vx, vy)
 
     this.player.play(vx || vy ? 'walk' : 'stand', true)
+
+    // 전환 중엔 move 패킷 보내지 않음
+    if (!this.isChangingMap && (vx || vy)) {
+      this.socket.emit('move', {
+        character_id: this.meId,
+        map_key     : this.currentMap,
+        x: this.player.x,
+        y: this.player.y
+      });
+    }
 
     if (!this.tilemap) return
 

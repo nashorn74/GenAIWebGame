@@ -112,7 +112,12 @@ export default function PhaserGame() {
 
   /* ────── 로그아웃 ────── */
   const logout = () => {
-    localStorage.clear()
+    /* MyScene 안에서 만든 socket을 찾아 disconnect */
+    const scene = gameRef.current?.scene.getScene('my-scene') as any
+    scene?.socket?.disconnect()
+    gameRef.current?.destroy(true)           // ★
+
+    sessionStorage.clear()        // 탭별 저장소 초기화
     navigate('/', { replace: true })
     window.location.reload()
   }

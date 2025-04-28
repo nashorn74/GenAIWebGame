@@ -15,4 +15,4 @@ COPY . .
 EXPOSE 5000
 
 # 컨테이너 실행 시 app.py 실행
-CMD [ "python", "app.py" ]
+CMD ["python", "-u", "app.py"]

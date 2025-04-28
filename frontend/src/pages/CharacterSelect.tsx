@@ -97,7 +97,8 @@ export default function CharacterSelect() {
 
   const handleStart = () => {
     if(!sel) return
-    localStorage.setItem('charId', String(sel.id))
+    sessionStorage.setItem('charId', String(sel.id))
+    sessionStorage.setItem('myChar', JSON.stringify(sel))
     navigate('/play')
   }
 

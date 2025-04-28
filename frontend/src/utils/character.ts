@@ -3,6 +3,9 @@ export interface CharacterDTO{
     id:number; user_id:number; name:string; level:number; job:string;
     hp:number; max_hp:number; mp:number; max_mp:number;
     gold: number;
+    map_key:string;
+    x: number;
+    y : number;
     /* 필요 시 다른 필드도… */
   }
   
@@ -10,7 +13,7 @@ export interface CharacterDTO{
   
   /** localStorage 에 저장해 둔 선택 캐릭터 id 가져오기 */
   export function getSelectedCharId(): number | null {
-    const v = localStorage.getItem('charId')
+    const v = sessionStorage.getItem('charId')
     return v ? Number(v) : null
   }
   

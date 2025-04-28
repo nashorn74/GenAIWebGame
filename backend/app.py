@@ -1,4 +1,6 @@
 from flask import Flask
+from flask import request          # ← 추가
+from uuid import uuid4
 from flask_cors import CORS
 from config import Config
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -11,55 +13,137 @@ from npcs import npcs_bp
 from items import items_bp
 from shop import shop_bp
 from maps import maps_bp
+from sqlalchemy.orm import Session   # 타입 힌트용
+
+sid_to_info: dict[str, dict[str, str|int]] = {}    # ★ {sid:{id, map}}
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
     db.init_app(app)
-    socketio = SocketIO(app)
+    socketio = SocketIO(app, cors_allowed_origins="*")   # CORS 허용
 
     CORS(app)
 
+    @socketio.on('connect')
+    def on_connect():
+        print('◆ socket connected', request.sid)      # ★ 반드시 떠야 함
+    @socketio.on('disconnect')
+    def on_disconnect():
+        print('◆ socket disconnected', request.sid)      # ★ 반드시 떠야 함
+
+    # ────────────────────────────────────────────────
+    # ① 맵 입장
     @socketio.on('join_map')
     def handle_join_map(data):
-        # data = { "character_id": 123 }
-        char_id = data['character_id']
+        char_id     = data['character_id']
+        new_map_key = data.get('map_key')          # 프런트가 보낸 맵
         char = Character.query.get(char_id)
-        if not char: return
+        if not char:
+            print('[join_map] invalid id', char_id); return
 
-        # 소켓 방(room) = 맵 이름
-        room_name = f"map_{char.map_key}"
-        join_room(room_name)
+        # 1) DB map_key 동기화
+        if new_map_key and new_map_key != char.map_key:
+            char.map_key = new_map_key
+            db.session.commit()
 
-        # 나의 현재 정보 브로드캐스트 (optional)
-        emit('player_joined', {'character': char.to_dict()}, room=room_name)
+        # 2) 이미 같은 소켓이 접속 중인가?
+        if request.sid in sid_to_info:
+            cur_map = sid_to_info[request.sid]['map']
 
+            # ───── ★ 맵이 바뀐 경우 ★ ─────
+            if cur_map != char.map_key:
+                # 1) 이전 방에 despawn
+                emit('player_despawn', {'id': char_id},
+                    room=f'map_{cur_map}')
+
+                # 2) room 이동
+                leave_room(f'map_{cur_map}')
+                join_room(f'map_{char.map_key}')
+
+                # 3) 새 방 플레이어들에게 spawn
+                emit('player_spawn', char.to_dict(),
+                    room=f'map_{char.map_key}', include_self=False)
+
+                # 👉 4) 새 방에 이미 있는 플레이어 목록을 **본인에게만** 전송
+                current = Character.query.filter_by(map_key=char.map_key).all()
+                emit('current_players', [c.to_dict() for c in current],
+                    room=request.sid)                      # ★ 핵심
+
+                sid_to_info[request.sid]['map'] = char.map_key
+                print(f'↷ {char.name}   {cur_map} → {char.map_key}')
+                return      # 여기서 끝
+
+        # 3) ★ 최초 소켓 접속 흐름 (기존 코드 거의 그대로) ─────
+        #    - 중복 세션 정리
+        #    - 새 room join
+        #    - current_players / player_spawn 브로드캐스트
+        dup_sid = next((s for s,inf in sid_to_info.items()
+                        if inf['id']==char_id), None)
+        if dup_sid:
+            leave_room(f"map_{sid_to_info[dup_sid]['map']}", sid=dup_sid)
+            emit('player_despawn', {'id': char_id},
+                room=f"map_{sid_to_info[dup_sid]['map']}")
+            sid_to_info.pop(dup_sid, None)
+
+        join_room(f"map_{char.map_key}")
+        sid_to_info[request.sid] = {'id': char_id, 'map': char.map_key}
+        print(f'▶ {char.name} join map_{char.map_key}')
+
+        # 현재 방 정보 전송
+        room = f"map_{char.map_key}"
+        current = Character.query.filter_by(map_key=char.map_key).all()
+        emit('current_players', [c.to_dict() for c in current])
+        emit('player_spawn', char.to_dict(), room=room, include_self=False)
+
+    # ② 이동
     @socketio.on('move')
     def handle_move(data):
-        # data = { "character_id": 123, "map_key": "city2", "x": 1500, "y": 2300 }
-        char_id = data['character_id']
-        new_map_key = data['map_key']
-        new_x = data['x']
-        new_y = data['y']
+        char_id        = data['character_id']
+        prev_map_key   = None
+        new_map_key    = data['map_key']
+        new_x, new_y   = data['x'], data['y']
 
         char = Character.query.get(char_id)
-        if not char: return
+        if not char:
+            return
 
-        # 맵이 바뀌었다면 기존 room을 떠나고 새 room join
+        # ── ① 맵이 바뀌면 구(舊) 방에 despawn 브로드캐스트 ──
         if new_map_key != char.map_key:
-            leave_room(f"map_{char.map_key}")
-            join_room(f"map_{new_map_key}")
+            prev_map_key = char.map_key
+            leave_room(f"map_{prev_map_key}")
+            emit('player_despawn', {'id': char_id},
+                room=f"map_{prev_map_key}")
 
-        # DB에 좌표 업데이트
-        char.map_key = new_map_key
-        char.x = new_x
-        char.y = new_y
+            join_room(f"map_{new_map_key}")            # 새 방 join
+            emit('player_spawn', char.to_dict(),       # 새 방에 spawn
+                room=f"map_{new_map_key}", include_self=False)
+
+            # sid_to_info 테이블도 맵키 갱신
+            if request.sid in sid_to_info:
+                sid_to_info[request.sid]['map'] = new_map_key
+
+        # ── ② DB 위치 업데이트 & 이동 브로드캐스트 ──
+        char.map_key, char.x, char.y = new_map_key, new_x, new_y
         db.session.commit()
 
-        # 같은 맵에 있는 모든 클라이언트에게 broadcast
-        room_name = f"map_{new_map_key}"
-        emit('player_moved', {'character_id': char_id, 'x': new_x, 'y': new_y}, room=room_name)
+        emit('player_move', {'id': char_id, 'x': new_x, 'y': new_y},
+            room=f"map_{new_map_key}", include_self=False)
+
+    # ③ 맵 퇴장 또는 브라우저 종료
+    @socketio.on('disconnect')
+    def on_disconnect():
+        info = sid_to_info.pop(request.sid, None)
+        if not info:
+            return
+        char = Character.query.get(info['id'])
+        if not char:
+            return
+        room = f"map_{info['map']}"
+        leave_room(room)
+        emit('player_despawn', {'id': info['id']}, room=room)
+        print(f'■ leave {room} (id:{info["id"]})')
 
     # Blueprint 등록
     app.register_blueprint(api_bp, url_prefix='/api')

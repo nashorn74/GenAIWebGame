@@ -15,10 +15,10 @@ import AdminMaps from './admin/pages/AdminMaps'
 import AdminNPCs from './admin/pages/AdminNPCs'
 import AdminItems from './admin/pages/AdminItems'
 
-const isLoggedIn = () => !!localStorage.getItem('arkacia_token')
-// “로그인된 userId & charId”를 localStorage에 간단히 넣어두는 헬퍼
-export const getUserId   = () => localStorage.getItem('userId')
-export const getCharId   = () => localStorage.getItem('charId')
+const isLoggedIn = () => !!sessionStorage.getItem('arkacia_token')
+// “로그인된 userId & charId”를 sessionStorage에 간단히 넣어두는 헬퍼
+export const getUserId = () => sessionStorage.getItem('userId')
+export const getCharId = () => sessionStorage.getItem('charId')
 
 export default function App() {
   return (
