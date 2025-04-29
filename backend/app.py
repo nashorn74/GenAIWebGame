@@ -4,7 +4,7 @@ from uuid import uuid4
 from flask_cors import CORS
 from config import Config
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from models import db, Character, NPC, Item, Map
+from models import db, Character, NPC, Item, Map, Monster
 from routes import bp as api_bp
 from auth import auth_bp
 from auth_admin import admin_auth_bp
@@ -13,7 +13,12 @@ from npcs import npcs_bp
 from items import items_bp
 from shop import shop_bp
 from maps import maps_bp
+from monsters import monsters_bp
 from sqlalchemy.orm import Session   # 타입 힌트용
+from sqlalchemy import select
+from utils.walkable import get_walkable
+from random import choice, shuffle
+import time
 
 sid_to_info: dict[str, dict[str, str|int]] = {}    # ★ {sid:{id, map}}
 
@@ -22,9 +27,60 @@ def create_app():
     app.config.from_object(Config)
 
     db.init_app(app)
-    socketio = SocketIO(app, cors_allowed_origins="*")   # CORS 허용
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
     CORS(app)
+
+    # ─────────────────────────────────────────────
+    #  🐾  몬스터 랜덤 이동 루프 (2초 간격)
+    # ─────────────────────────────────────────────
+    def monster_ai():
+        walkable = get_walkable("dungeon1")        # 캐시
+        while True:
+            socketio.sleep(2.0)
+
+            with app.app_context():
+                mobs = Monster.query.filter_by(
+                    map_key="dungeon1", is_alive=True
+                ).all()
+
+                # ── ① 현재 점유 타일 set ──
+                occupied: set[tuple[int, int]] = {(m.x, m.y) for m in mobs}
+
+                shuffle(mobs)                       # 이동 순서 랜덤화
+                for m in mobs:
+                    # ── ② 네 방향 후보 중 walkable ∩ not-occupied ──
+                    cand = [
+                        (m.x + 1, m.y),
+                        (m.x - 1, m.y),
+                        (m.x, m.y + 1),
+                        (m.x, m.y - 1),
+                    ]
+                    cand = [p for p in cand if p in walkable and p not in occupied]
+
+                    if not cand:        # 갈 곳 없으면 stay
+                        continue
+
+                    nx, ny = choice(cand)
+                    occupied.remove((m.x, m.y))     # 기존 자리 비우고
+                    occupied.add((nx, ny))          # 새 자리 점유
+
+                    m.x, m.y = nx, ny
+                    socketio.emit(
+                        "monster_move",
+                        {"id": m.id, "x": nx, "y": ny},
+                        room="map_dungeon1",
+                    )
+
+                db.session.commit()
+
+    def random_step(x: int, y: int, walkable: set[tuple[int,int]]):
+        cand = [(x+1,y), (x-1,y), (x,y+1), (x,y-1)]
+        cand = [p for p in cand if p in walkable]
+        return choice(cand) if cand else (x, y)
+
+    # Flask-SocketIO 의 헬퍼로 백그라운드 태스크 시작
+    socketio.start_background_task(monster_ai)
 
     @socketio.on('connect')
     def on_connect():
@@ -69,7 +125,14 @@ def create_app():
                 # 👉 4) 새 방에 이미 있는 플레이어 목록을 **본인에게만** 전송
                 current = Character.query.filter_by(map_key=char.map_key).all()
                 emit('current_players', [c.to_dict() for c in current],
-                    room=request.sid)                      # ★ 핵심
+                    room=request.sid)     
+                
+                # ─────────────────────────────────────────────
+                # ★ NEW:  해당 맵의 현재 몬스터 리스트 전송
+                monsters = Monster.query.filter_by(map_key=char.map_key, is_alive=True).all()
+                emit('current_monsters', [m.to_dict() for m in monsters],
+                    room=request.sid)
+                # ─────────────────────────────────────────────                 # ★ 핵심
 
                 sid_to_info[request.sid]['map'] = char.map_key
                 print(f'↷ {char.name}   {cur_map} → {char.map_key}')
@@ -96,6 +159,9 @@ def create_app():
         current = Character.query.filter_by(map_key=char.map_key).all()
         emit('current_players', [c.to_dict() for c in current])
         emit('player_spawn', char.to_dict(), room=room, include_self=False)
+
+        monsters = Monster.query.filter_by(map_key=char.map_key, is_alive=True).all()
+        emit('current_monsters', [m.to_dict() for m in monsters], room=request.sid)
 
     # ② 이동
     @socketio.on('move')
@@ -154,6 +220,7 @@ def create_app():
     app.register_blueprint(shop_bp, url_prefix='/api')
     app.register_blueprint(admin_auth_bp, url_prefix='/auth')  # /auth/admin_login
     app.register_blueprint(maps_bp, url_prefix='/api')
+    app.register_blueprint(monsters_bp, url_prefix='/api')
 
     @app.route('/')
     def index():
@@ -292,7 +359,7 @@ if __name__ == '__main__':
                 ),
                 Map(
                     key='dungeon1',
-                    display_name='Dungeon 1',
+                    display_name='Ice Cavern',
                     json_file='dungeon1.json',
                     tileset_file='tmw_dungeon_spacing.png',
                     tile_width=128,
@@ -313,6 +380,41 @@ if __name__ == '__main__':
             ]
             db.session.bulk_save_objects(seed_maps)
             db.session.commit()
+        
+        if Monster.query.count() == 0:
+            # 드롭 아이템 FK 먼저 가져오기
+            get_item = lambda n: db.session.execute(
+                select(Item).filter_by(name=n)
+            ).scalar_one()
 
-    # socketio 인스턴스를 create_app 내부에서 반환하게 하거나, 전역으로 만들어야 함
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+            seed_monsters = [
+                Monster(name='Slime #1', species='Slime', level=14,
+                        map_key='dungeon1', x=4,  y=15,
+                        hp=120, max_hp=120, attack=8, defense=2,
+                        drop_item=get_item('Slime Jelly (슬라임 젤)')),
+                Monster(name='Slime #2', species='Slime', level=14,
+                        map_key='dungeon1', x=16, y=15,
+                        hp=120, max_hp=120, attack=8, defense=2,
+                        drop_item=get_item('Slime Jelly (슬라임 젤)')),
+                Monster(name='Snow Wolf #1', species='SnowWolf', level=15,
+                        map_key='dungeon1', x=6,  y=20,
+                        hp=260, max_hp=260, attack=22, defense=6,
+                        drop_item=get_item('Wolf Fang (늑대 이빨)')),
+                Monster(name='Snow Wolf #2', species='SnowWolf', level=15,
+                        map_key='dungeon1', x=14, y=21,
+                        hp=260, max_hp=260, attack=22, defense=6,
+                        drop_item=get_item('Wolf Fang (늑대 이빨)')),
+                Monster(name='Ice Golem #1', species='IceGolem', level=17,
+                        map_key='dungeon1', x=8,  y=26,
+                        hp=680, max_hp=680, attack=40, defense=18, mp=50, max_mp=50,
+                        drop_item=get_item('Ice Crystal (얼음 결정)')),
+            ]
+            db.session.bulk_save_objects(seed_monsters)
+            db.session.commit()
+
+    # dev 환경이므로 allow_unsafe_werkzeug 옵션 활성
+    socketio.run(app,
+                 host='0.0.0.0',
+                 port=5000,
+                 debug=True,
+                 allow_unsafe_werkzeug=True)

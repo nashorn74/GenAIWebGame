@@ -13,6 +13,7 @@ export class MyScene extends Phaser.Scene {
   private socket!: Socket;
   /** id ➜ (container, nameText) */
   private actors = new Map<number, Phaser.GameObjects.Container>();
+  private monsters = new Map<number, Phaser.GameObjects.Container>();
   private currentMap!: MapKey
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
@@ -59,6 +60,13 @@ export class MyScene extends Phaser.Scene {
       this.load.image(`npc${id}_1`, `assets/npc${id}_stand1.png`)
       this.load.image(`npc${id}_2`, `assets/npc${id}_stand2.png`)
     }
+
+    // 몬스터 6장 한꺼번에
+    [
+      'monster1_stand1','monster1_stand2',
+      'monster4_stand1','monster4_stand2',
+      'monster5_stand1','monster5_stand2',
+    ].forEach(k => this.load.image(k, `assets/${k}.png`))
 
     /* --- BGM --- */
     this.load.audio(
@@ -158,6 +166,35 @@ export class MyScene extends Phaser.Scene {
       this.removeActor(id);
     });
 
+    this.socket.on('current_monsters', (arr: any[]) => {
+      console.log(arr);
+      arr.forEach(m => this.spawnOrUpdateMonster(m))
+    })
+    this.socket.on('monster_spawn',   m => this.spawnOrUpdateMonster(m))
+    this.socket.on('monster_move', p => {
+      const cont = this.monsters.get(p.id)
+      if (!cont || !this.tilemap) return
+    
+      const dstX = (p.x + 0.5) * this.tilemap.tileWidth
+      const dstY = (p.y + 0.5) * this.tilemap.tileHeight
+    
+      // 이미 그 위치라면 아무것도 안 함
+      if (Math.abs(cont.x - dstX) < 1 && Math.abs(cont.y - dstY) < 1) return
+    
+      // 8-프레임(≈0.13s) 동안 선형 이동 → “뚝” 사라지는 느낌 제거
+      this.tweens.add({
+        targets: cont,
+        x: dstX,
+        y: dstY,
+        duration: 130,            // 8 프레임 @60 FPS
+        ease: 'Linear'
+      })
+    })
+    this.socket.on('monster_despawn', ({id}) => {
+      this.monsters.get(id)?.destroy(true)
+      this.monsters.delete(id)
+    })
+
     /* 스탠드/워크 애니메이션 */
     this.anims.create({
       key: 'stand',
@@ -197,6 +234,41 @@ export class MyScene extends Phaser.Scene {
     this.scale.on(Phaser.Scale.Events.RESIZE, (s) =>
       this.miniCam.setPosition(s.width - 190, 60)
     )
+  }
+
+  /* 컨테이너 = [sprite, nameText] */
+  private spawnOrUpdateMonster(m: any) {
+    const existed = this.monsters.get(m.id)
+    // ─ ① 타일 좌표 → 픽셀 좌표 변환
+    const tx = (m.x + 0.5) * this.tilemap!.tileWidth   // 128 px 기준
+    const ty = (m.y + 0.5) * this.tilemap!.tileHeight
+  
+    if (existed) {               // 이미 있으면 위치만 갱신
+      existed.setPosition(tx, ty)
+      return
+    }
+  
+    // ─ ② 스프라이트 키 계산
+    const key1 = m.sprite1.split('/').pop()!.replace('.png', '')
+    const key2 = m.sprite2.split('/').pop()!.replace('.png', '')
+  
+    const body    = this.add.sprite(0, 0, key1)
+    const idleKey = `${m.id}_idle`
+    if (!this.anims.exists(idleKey)) {
+      this.anims.create({
+        key   : idleKey,
+        frames: [{ key: key1 }, { key: key2 }],
+        frameRate: 2, repeat: -1,
+      })
+    }
+    body.play(idleKey)
+  
+    const label = this.add.text(0, -60, m.species,
+      { fontSize: '14px', color: '#fff', stroke:'#000', strokeThickness:3 }
+    ).setOrigin(0.5)
+  
+    const cont = this.add.container(tx, ty, [body, label]).setDepth(1)
+    this.monsters.set(m.id, cont)
   }
 
   /* ───────────────── ① create or update ───────────────── */

@@ -296,3 +296,56 @@ class Item(db.Model):
             'defense_power': self.defense_power,
             'effect_value': self.effect_value
         }
+
+class Monster(db.Model):
+    __tablename__ = 'monsters'
+
+    id        = db.Column(db.Integer, primary_key=True)
+    name      = db.Column(db.String(50), nullable=False)        # Slime #1 …
+    species   = db.Column(db.String(30), nullable=False)        # Slime / SnowWolf …
+    level     = db.Column(db.Integer,  default=1)
+
+    map_key   = db.Column(db.String(50), default='dungeon1')
+    x         = db.Column(db.Integer, default=0)
+    y         = db.Column(db.Integer, default=0)
+
+    hp        = db.Column(db.Integer, default=50)
+    max_hp    = db.Column(db.Integer, default=50)
+    mp        = db.Column(db.Integer, default=0)
+    max_mp    = db.Column(db.Integer, default=0)
+    attack    = db.Column(db.Integer, default=5)
+    defense   = db.Column(db.Integer, default=2)
+
+    # 드롭 아이템 FK
+    drop_item_id = db.Column(db.Integer, db.ForeignKey('items.id'))
+    drop_item    = db.relationship('Item', lazy=True)
+
+    is_alive  = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    SPRITE_MAP = {
+        'Slime'    : ('monster1_stand1.png', 'monster1_stand2.png'),
+        'SnowWolf' : ('monster4_stand1.png', 'monster4_stand2.png'),
+        'IceGolem' : ('monster5_stand1.png', 'monster5_stand2.png'),
+    }
+
+    def to_dict(self):
+        s1, s2 = self.SPRITE_MAP.get(self.species, ('', ''))
+        base   = '/public/assets/'
+        return {
+            'id'      : self.id,
+            'name'    : self.name,
+            'species' : self.species,
+            'level'   : self.level,
+            'map_key' : self.map_key,
+            'x'       : self.x,
+            'y'       : self.y,
+            'hp'      : self.hp,
+            'max_hp'  : self.max_hp,
+            'mp'      : self.mp,
+            'max_mp'  : self.max_mp,
+            'attack'  : self.attack,
+            'defense' : self.defense,
+            'sprite1': base + s1,
+            'sprite2': base + s2,
+        }
