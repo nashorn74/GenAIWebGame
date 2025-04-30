@@ -316,6 +316,11 @@ class Monster(db.Model):
     attack    = db.Column(db.Integer, default=5)
     defense   = db.Column(db.Integer, default=2)
 
+    spawn_x   = db.Column(db.Integer)       # 최초 생성 타일
+    spawn_y   = db.Column(db.Integer)
+    respawn_s = db.Column(db.Integer, default=15)   # 죽은 뒤 n초 후 부활
+    died_at   = db.Column(db.Float)        # epoch time, 살아있으면 NULL
+
     # 드롭 아이템 FK
     drop_item_id = db.Column(db.Integer, db.ForeignKey('items.id'))
     drop_item    = db.relationship('Item', lazy=True)

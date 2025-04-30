@@ -195,6 +195,34 @@ export class MyScene extends Phaser.Scene {
       this.monsters.delete(id)
     })
 
+    /* --- 소켓 이벤트 추가 --- */
+    this.socket.on('monster_hit', (info: {
+      id:number, dmg:number, hp:number, x:number, y:number
+    }) => {
+      const cont = this.monsters.get(info.id);
+      if (!cont || !this.tilemap) return;
+
+      /* ① 데미지 붉은 글자 */
+      const dmgText = this.add.text(0, -80, `-${info.dmg}`, {
+        fontSize:'28px', color:'#ff4444', stroke:'#000', strokeThickness:4
+      }).setOrigin(0.5);
+      cont.add(dmgText);
+      this.tweens.add({
+        targets: dmgText, y: dmgText.y-40, alpha:0,
+        duration:600, ease:'Cubic.easeOut',
+        onComplete: () => dmgText.destroy()
+      });
+
+      /* ② 넉백(서버가 준 새 좌표까지 부드럽게) */
+      const dstX = (info.x + 0.5) * this.tilemap.tileWidth;
+      const dstY = (info.y + 0.5) * this.tilemap.tileHeight;
+      this.tweens.add({ targets:cont, x:dstX, y:dstY,
+                        duration:120, ease:'Linear' });
+
+      /* ③ HP 0이면 서버가 monster_despawn 보내므로
+            별도 처리 필요 없음 */
+    });
+
     /* 스탠드/워크 애니메이션 */
     this.anims.create({
       key: 'stand',
@@ -376,6 +404,10 @@ export class MyScene extends Phaser.Scene {
 
     /* 다른 플레이어 전부 제거 → current_players 다시 받을 때만 렌더 */
     this.actors.forEach((_, id) => this.removeActor(id))
+
+    /* ─ 이전 맵 몬스터 전부 제거 ─ */
+    this.monsters.forEach((cont) => cont.destroy(true));
+    this.monsters.clear();
 
     this.isChangingMap = false              // ★ 잠금 해제
   }

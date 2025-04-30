@@ -4,7 +4,7 @@ from uuid import uuid4
 from flask_cors import CORS
 from config import Config
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from models import db, Character, NPC, Item, Map, Monster
+from models import db, Character, NPC, Item, Map, Monster, CharacterItem
 from routes import bp as api_bp
 from auth import auth_bp
 from auth_admin import admin_auth_bp
@@ -19,7 +19,10 @@ from sqlalchemy import select
 from utils.walkable import get_walkable
 from random import choice, shuffle
 import time
+import eventlet               # A: 반드시 먼저 import
+eventlet.monkey_patch()       # A: 표준 라이브러리 패치
 
+knockback_until: dict[int, float] = {}   # {monster_id: unix_timestamp}
 sid_to_info: dict[str, dict[str, str|int]] = {}    # ★ {sid:{id, map}}
 
 def create_app():
@@ -27,9 +30,18 @@ def create_app():
     app.config.from_object(Config)
 
     db.init_app(app)
-    socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+    socketio = SocketIO(app, 
+                        cors_allowed_origins="*", 
+                        async_mode='eventlet',     # A: thread → eventlet
+    )
 
     CORS(app)
+
+    @app.teardown_appcontext
+    def remove_session(exc=None):
+        if exc:
+            db.session.rollback()  # D: 예외 시 롤백
+        db.session.remove()
 
     # ─────────────────────────────────────────────
     #  🐾  몬스터 랜덤 이동 루프 (2초 간격)
@@ -38,41 +50,69 @@ def create_app():
         walkable = get_walkable("dungeon1")        # 캐시
         while True:
             socketio.sleep(2.0)
+            try:
+                with app.app_context():
+                    now  = time.time()
 
-            with app.app_context():
-                mobs = Monster.query.filter_by(
-                    map_key="dungeon1", is_alive=True
-                ).all()
-
-                # ── ① 현재 점유 타일 set ──
-                occupied: set[tuple[int, int]] = {(m.x, m.y) for m in mobs}
-
-                shuffle(mobs)                       # 이동 순서 랜덤화
-                for m in mobs:
-                    # ── ② 네 방향 후보 중 walkable ∩ not-occupied ──
-                    cand = [
-                        (m.x + 1, m.y),
-                        (m.x - 1, m.y),
-                        (m.x, m.y + 1),
-                        (m.x, m.y - 1),
-                    ]
-                    cand = [p for p in cand if p in walkable and p not in occupied]
-
-                    if not cand:        # 갈 곳 없으면 stay
-                        continue
-
-                    nx, ny = choice(cand)
-                    occupied.remove((m.x, m.y))     # 기존 자리 비우고
-                    occupied.add((nx, ny))          # 새 자리 점유
-
-                    m.x, m.y = nx, ny
-                    socketio.emit(
-                        "monster_move",
-                        {"id": m.id, "x": nx, "y": ny},
-                        room="map_dungeon1",
+                    # ── 0) 먼저 “죽은 몬스터 중 리스폰할 대상” 검사 ──
+                    dead_ready = (
+                        Monster.query.filter_by(is_alive=False, map_key='dungeon1')
+                        .filter(Monster.died_at.isnot(None))          # safety
+                        .all()
                     )
+                    for m in dead_ready:
+                        if now - m.died_at >= m.respawn_s:
+                            m.is_alive = True
+                            m.hp       = m.max_hp
+                            m.x, m.y   = m.spawn_x, m.spawn_y
+                            m.died_at  = None
+                            socketio.emit('monster_spawn', m.to_dict(), room='map_dungeon1')
 
-                db.session.commit()
+                    # ── 1) 살아있는 몬스터 랜덤 이동 (기존 로직) ──
+
+                    mobs = Monster.query.filter_by(
+                        map_key="dungeon1", is_alive=True
+                    ).all()
+
+                    # ── ① 현재 점유 타일 set ──
+                    occupied: set[tuple[int, int]] = {(m.x, m.y) for m in mobs}
+
+                    shuffle(mobs)                       # 이동 순서 랜덤화
+                    for m in mobs:
+                        # ── ❌ 아직 넉백 쿨타임이면 건너뜀 ──
+                        if knockback_until.get(m.id, 0) > now:
+                            continue
+
+                        # ── ② 네 방향 후보 중 walkable ∩ not-occupied ──
+                        cand = [
+                            (m.x + 1, m.y),
+                            (m.x - 1, m.y),
+                            (m.x, m.y + 1),
+                            (m.x, m.y - 1),
+                        ]
+                        cand = [p for p in cand if p in walkable and p not in occupied]
+
+                        if not cand:        # 갈 곳 없으면 stay
+                            continue
+
+                        nx, ny = choice(cand)
+                        occupied.discard((m.x, m.y))     # 기존 자리 비우고
+                        occupied.add((nx, ny))          # 새 자리 점유
+
+                        m.x, m.y = nx, ny
+                        socketio.emit(
+                            "monster_move",
+                            {"id": m.id, "x": nx, "y": ny},
+                            room="map_dungeon1",
+                        )
+
+                    db.session.commit()
+            except Exception:
+                with app.app_context():        # 롤백도 컨텍스트 안에서
+                    db.session.rollback()
+                raise
+            #finally:
+            #    db.session.remove()
 
     def random_step(x: int, y: int, walkable: set[tuple[int,int]]):
         cand = [(x+1,y), (x-1,y), (x,y+1), (x,y-1)]
@@ -94,108 +134,152 @@ def create_app():
     @socketio.on('join_map')
     def handle_join_map(data):
         char_id     = data['character_id']
-        new_map_key = data.get('map_key')          # 프런트가 보낸 맵
-        char = Character.query.get(char_id)
+        req_map_key = data.get('map_key')        # 프런트가 보낸 맵
+        char: Character = db.session.get(Character, char_id)
         if not char:
-            print('[join_map] invalid id', char_id); return
+            print('[join_map] invalid id', char_id)
+            return
 
-        # 1) DB map_key 동기화
-        if new_map_key and new_map_key != char.map_key:
-            char.map_key = new_map_key
-            db.session.commit()
+        # ── 1. 맵이 바뀌었으면 DB 반영 ───────────────────────────────
+        if req_map_key and req_map_key != char.map_key:
+            char.map_key = req_map_key
+            db.session.commit()          # 여기까진 세션 유지
 
-        # 2) 이미 같은 소켓이 접속 중인가?
+        # ★ 세션을 닫기 전에 필요한 값들을 “복사”해 둔다
+        cur_map_key = char.map_key
+        char_dict   = char.to_dict()     # player_spawn 용
+        db.session.remove()              # 이제 세션 종료 (detached OK)
+
+        # ── 2. socket-room 처리 ────────────────────────────────────
+        #    이후에는 char 대신 cur_map_key / char_dict 사용
+        # 2-1) 중복 접속 체크
         if request.sid in sid_to_info:
-            cur_map = sid_to_info[request.sid]['map']
+            prev_map = sid_to_info[request.sid]['map']
+            if prev_map != cur_map_key:
+                emit('player_despawn', {'id': char_id}, room=f'map_{prev_map}')
+                leave_room(f'map_{prev_map}')
+                join_room(f'map_{cur_map_key}')
+                emit('player_spawn', char_dict,
+                    room=f'map_{cur_map_key}', include_self=False)
 
-            # ───── ★ 맵이 바뀐 경우 ★ ─────
-            if cur_map != char.map_key:
-                # 1) 이전 방에 despawn
-                emit('player_despawn', {'id': char_id},
-                    room=f'map_{cur_map}')
+                sid_to_info[request.sid]['map'] = cur_map_key
+        else:
+            join_room(f"map_{cur_map_key}")
+            sid_to_info[request.sid] = {'id': char_id, 'map': cur_map_key}
+            emit('player_spawn', char_dict,
+                room=f"map_{cur_map_key}", include_self=False)
 
-                # 2) room 이동
-                leave_room(f'map_{cur_map}')
-                join_room(f'map_{char.map_key}')
+        # ── 3. 현재 플레이어/몬스터 리스트는 새 세션으로 다시 조회 ──
+        with app.app_context():
+            current = Character.query.filter_by(map_key=cur_map_key).all()
+            emit('current_players', [c.to_dict() for c in current], room=request.sid)
 
-                # 3) 새 방 플레이어들에게 spawn
-                emit('player_spawn', char.to_dict(),
-                    room=f'map_{char.map_key}', include_self=False)
-
-                # 👉 4) 새 방에 이미 있는 플레이어 목록을 **본인에게만** 전송
-                current = Character.query.filter_by(map_key=char.map_key).all()
-                emit('current_players', [c.to_dict() for c in current],
-                    room=request.sid)     
-                
-                # ─────────────────────────────────────────────
-                # ★ NEW:  해당 맵의 현재 몬스터 리스트 전송
-                monsters = Monster.query.filter_by(map_key=char.map_key, is_alive=True).all()
-                emit('current_monsters', [m.to_dict() for m in monsters],
-                    room=request.sid)
-                # ─────────────────────────────────────────────                 # ★ 핵심
-
-                sid_to_info[request.sid]['map'] = char.map_key
-                print(f'↷ {char.name}   {cur_map} → {char.map_key}')
-                return      # 여기서 끝
-
-        # 3) ★ 최초 소켓 접속 흐름 (기존 코드 거의 그대로) ─────
-        #    - 중복 세션 정리
-        #    - 새 room join
-        #    - current_players / player_spawn 브로드캐스트
-        dup_sid = next((s for s,inf in sid_to_info.items()
-                        if inf['id']==char_id), None)
-        if dup_sid:
-            leave_room(f"map_{sid_to_info[dup_sid]['map']}", sid=dup_sid)
-            emit('player_despawn', {'id': char_id},
-                room=f"map_{sid_to_info[dup_sid]['map']}")
-            sid_to_info.pop(dup_sid, None)
-
-        join_room(f"map_{char.map_key}")
-        sid_to_info[request.sid] = {'id': char_id, 'map': char.map_key}
-        print(f'▶ {char.name} join map_{char.map_key}')
-
-        # 현재 방 정보 전송
-        room = f"map_{char.map_key}"
-        current = Character.query.filter_by(map_key=char.map_key).all()
-        emit('current_players', [c.to_dict() for c in current])
-        emit('player_spawn', char.to_dict(), room=room, include_self=False)
-
-        monsters = Monster.query.filter_by(map_key=char.map_key, is_alive=True).all()
-        emit('current_monsters', [m.to_dict() for m in monsters], room=request.sid)
+            monsters = Monster.query.filter_by(map_key=cur_map_key,
+                                            is_alive=True).all()
+            emit('current_monsters', [m.to_dict() for m in monsters],
+                room=request.sid)
 
     # ② 이동
     @socketio.on('move')
     def handle_move(data):
-        char_id        = data['character_id']
-        prev_map_key   = None
-        new_map_key    = data['map_key']
-        new_x, new_y   = data['x'], data['y']
+        """
+        • 플레이어 이동 브로드캐스트
+        • 이동한 타일에 몬스터가 있으면 타격 → 데미지 / 넉백 / 드롭 처리
+        """
+        char_id          = data['character_id']
+        new_map          = data['map_key']
+        new_px, new_py   = data['x'], data['y']          # 픽셀 좌표
 
-        char = Character.query.get(char_id)
+        char: Character = db.session.get(Character, char_id)
         if not char:
+            db.session.remove()
             return
 
-        # ── ① 맵이 바뀌면 구(舊) 방에 despawn 브로드캐스트 ──
-        if new_map_key != char.map_key:
-            prev_map_key = char.map_key
-            leave_room(f"map_{prev_map_key}")
-            emit('player_despawn', {'id': char_id},
-                room=f"map_{prev_map_key}")
+        # ── 0. 이동 전·후 좌표 계산 ───────────────────────────────
+        prev_px, prev_py = char.x, char.y                # DB에 있던 이전 픽셀
+        char.map_key, char.x, char.y = new_map, new_px, new_py
+        db.session.commit()                              # 캐릭터 위치 확정
 
-            join_room(f"map_{new_map_key}")            # 새 방 join
-            emit('player_spawn', char.to_dict(),       # 새 방에 spawn
-                room=f"map_{new_map_key}", include_self=False)
+        # ── 0-1. 이동 패킷 브로드캐스트 ──────────────────────────
+        emit('player_move', {'id': char_id,
+                            'x': new_px, 'y': new_py},
+            room=f"map_{new_map}", include_self=False)
 
-            # sid_to_info 테이블도 맵키 갱신
-            if request.sid in sid_to_info:
-                sid_to_info[request.sid]['map'] = new_map_key
+        # 픽셀 → 타일 좌표
+        TILE     = 128
+        tx,  ty  = int(new_px  // TILE), int(new_py  // TILE)
+        ptx, pty = int(prev_px // TILE), int(prev_py // TILE)
 
-        # ── ② DB 위치 업데이트 & 이동 브로드캐스트 ──
-        char.map_key, char.x, char.y = new_map_key, new_x, new_y
+        # ── 1. 해당 타일에 살아있는 몬스터 탐색 ──────────────────
+        mob: Monster | None = (
+            Monster.query
+                .filter_by(map_key=new_map,
+                            x=tx, y=ty,
+                            is_alive=True)
+                .first()
+        )
+        if not mob:                                        # 충돌 X
+            db.session.rollback()
+            return
+
+        # ── 2. 데미지 계산 ──────────────────────────────────────
+        atk  = max(1, char.str)                            # 아주 단순한 예시
+        dmg  = max(1, atk - mob.defense)
+        mob.hp = max(0, mob.hp - dmg)
+
+        # ── 3. 넉백(1타일) 계산 ──────────────────────────────────
+        dx, dy     = tx - ptx, ty - pty                    # 이동 방향
+        kb_tx, kb_ty = mob.x - dx, mob.y - dy              # 반대 1칸
+
+        walkable   = get_walkable(new_map)
+        occupied   = {(m.x, m.y) for m in
+                    Monster.query.filter_by(map_key=new_map,
+                                            is_alive=True)}
+        # 이동 가능하면 반영
+        if (kb_tx, kb_ty) in walkable and (kb_tx, kb_ty) not in occupied:
+            mob.x, mob.y = kb_tx, kb_ty
+
+        if (mob.x, mob.y) != (tx, ty):       # 실제로 밀렸다면
+            knockback_until[mob.id] = time.time() + 3.0   # 3초 동안 휴식
+
+        # ── 4. 드롭 & 인벤토리 업데이트 ──────────────────────────
+        if mob.hp == 0:
+            now = time.time()
+            mob.is_alive = False
+            mob.died_at  = now
+            knockback_until.pop(mob.id, None)   # 쿨타임 정보 정리
+            
+            print(f"mob.drop_item_id={mob.drop_item_id}")
+            if mob.drop_item_id:                           # NULL 가드
+                ci = (CharacterItem.query
+                    .filter_by(character_id=char.id,
+                                item_id=mob.drop_item_id)
+                    .first())
+                if ci:
+                    ci.quantity += 1
+                else:
+                    db.session.add(CharacterItem(character_id=char.id,
+                                                item_id=mob.drop_item_id,
+                                                quantity=1))
+
+            db.session.commit()                                # === 트랜잭션 끝 ===
+
+        # ── 5. 결과 브로드캐스트 ─────────────────────────────────
+        socketio.emit('monster_hit',
+                    {'id' : mob.id,
+                    'dmg': dmg,
+                    'hp' : mob.hp,
+                    'x'  : mob.x,
+                    'y'  : mob.y},
+                    room=f"map_{new_map}")
+
+        if mob.hp == 0:
+            socketio.emit('monster_despawn',
+                        {'id': mob.id},
+                        room=f"map_{new_map}")
+        
         db.session.commit()
-
-        emit('player_move', {'id': char_id, 'x': new_x, 'y': new_y},
-            room=f"map_{new_map_key}", include_self=False)
+        db.session.remove()        # ★ **딱 한 번, 맨 끝에서 세션 해제**
 
     # ③ 맵 퇴장 또는 브라우저 종료
     @socketio.on('disconnect')
@@ -203,7 +287,7 @@ def create_app():
         info = sid_to_info.pop(request.sid, None)
         if not info:
             return
-        char = Character.query.get(info['id'])
+        char = db.session.get(Character, info['id'])
         if not char:
             return
         room = f"map_{info['map']}"
@@ -390,26 +474,31 @@ if __name__ == '__main__':
             seed_monsters = [
                 Monster(name='Slime #1', species='Slime', level=14,
                         map_key='dungeon1', x=4,  y=15,
+                        spawn_x=4, spawn_y=15, respawn_s=15,
                         hp=120, max_hp=120, attack=8, defense=2,
                         drop_item=get_item('Slime Jelly (슬라임 젤)')),
                 Monster(name='Slime #2', species='Slime', level=14,
                         map_key='dungeon1', x=16, y=15,
+                        spawn_x=16, spawn_y=15, respawn_s=15,
                         hp=120, max_hp=120, attack=8, defense=2,
                         drop_item=get_item('Slime Jelly (슬라임 젤)')),
                 Monster(name='Snow Wolf #1', species='SnowWolf', level=15,
                         map_key='dungeon1', x=6,  y=20,
+                        spawn_x=6, spawn_y=20, respawn_s=20,
                         hp=260, max_hp=260, attack=22, defense=6,
                         drop_item=get_item('Wolf Fang (늑대 이빨)')),
                 Monster(name='Snow Wolf #2', species='SnowWolf', level=15,
                         map_key='dungeon1', x=14, y=21,
+                        spawn_x=14, spawn_y=21, respawn_s=20,
                         hp=260, max_hp=260, attack=22, defense=6,
                         drop_item=get_item('Wolf Fang (늑대 이빨)')),
                 Monster(name='Ice Golem #1', species='IceGolem', level=17,
                         map_key='dungeon1', x=8,  y=26,
+                        spawn_x=8, spawn_y=26, respawn_s=30,
                         hp=680, max_hp=680, attack=40, defense=18, mp=50, max_mp=50,
                         drop_item=get_item('Ice Crystal (얼음 결정)')),
             ]
-            db.session.bulk_save_objects(seed_monsters)
+            db.session.add_all(seed_monsters) 
             db.session.commit()
 
     # dev 환경이므로 allow_unsafe_werkzeug 옵션 활성
@@ -417,4 +506,5 @@ if __name__ == '__main__':
                  host='0.0.0.0',
                  port=5000,
                  debug=True,
-                 allow_unsafe_werkzeug=True)
+                 #allow_unsafe_werkzeug=True
+                 )
