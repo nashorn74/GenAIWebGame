@@ -35,6 +35,18 @@ export class MyScene extends Phaser.Scene {
 
   private isChangingMap = false;         // ★ 전환 중 플래그
   private meId = Number(sessionStorage.getItem('charId'));
+  private monstersMeta: Record<number, { max_hp:number }> = {};
+  private monsterQueue: any[] = [];   //  ← ① 추가
+  private mapReady = false;           //  ← ② 추가
+
+  upsertMonster = (m:any)=>{
+    if(!this.mapReady){          // 아직 맵 세팅 중이면
+      this.monsterQueue.push(m); //  → 큐에 적재
+      return;
+    }
+    this.monstersMeta[m.id] = { max_hp: m.max_hp };
+    this.spawnOrUpdateMonster(m);
+  };
 
   /* ▽▽ SETUP ▽▽ */
   constructor() { super('my-scene') }
@@ -166,11 +178,10 @@ export class MyScene extends Phaser.Scene {
       this.removeActor(id);
     });
 
-    this.socket.on('current_monsters', (arr: any[]) => {
-      console.log(arr);
-      arr.forEach(m => this.spawnOrUpdateMonster(m))
-    })
-    this.socket.on('monster_spawn',   m => this.spawnOrUpdateMonster(m))
+    this.socket.on('current_monsters', arr =>
+      arr.forEach(this.upsertMonster)          // ← 수정!
+    );
+    this.socket.on('monster_spawn',    this.upsertMonster); // ← 수정!
     this.socket.on('monster_move', p => {
       const cont = this.monsters.get(p.id)
       if (!cont || !this.tilemap) return
@@ -180,6 +191,10 @@ export class MyScene extends Phaser.Scene {
     
       // 이미 그 위치라면 아무것도 안 함
       if (Math.abs(cont.x - dstX) < 1 && Math.abs(cont.y - dstY) < 1) return
+
+      if(!this.monsters.has(p.id)){
+        this.upsertMonster({...p, sprite1:'dummy.png', sprite2:'dummy.png', species:''});
+      }
     
       // 8-프레임(≈0.13s) 동안 선형 이동 → “뚝” 사라지는 느낌 제거
       this.tweens.add({
@@ -196,32 +211,153 @@ export class MyScene extends Phaser.Scene {
     })
 
     /* --- 소켓 이벤트 추가 --- */
-    this.socket.on('monster_hit', (info: {
-      id:number, dmg:number, hp:number, x:number, y:number
-    }) => {
+    this.socket.on('monster_hit', (info)=>{
       const cont = this.monsters.get(info.id);
       if (!cont || !this.tilemap) return;
-
-      /* ① 데미지 붉은 글자 */
-      const dmgText = this.add.text(0, -80, `-${info.dmg}`, {
-        fontSize:'28px', color:'#ff4444', stroke:'#000', strokeThickness:4
-      }).setOrigin(0.5);
+    
+      /* ① 카메라 & 히트-스톱 */
+      this.cameras.main.shake(100,.01);
+      this.time.timeScale=.05;
+      this.time.delayedCall(80,()=>this.time.timeScale=1);
+    
+      /* ② HP 바 */
+      const bar = cont.getData('hpBar') as Phaser.GameObjects.Graphics;
+      if (bar){
+        const ratio = info.hp / (this.monstersMeta[info.id]?.max_hp??info.hp);
+        this.tweens.add({targets:bar,scaleX:ratio,duration:120,ease:'Linear'});
+      }
+    
+      /* ③ 데미지 텍스트 */
+      const dmgText = this.add.text(0,-80,`-${info.dmg}`,{fontSize:'28px',
+        color:'#ff4444',stroke:'#000',strokeThickness:4}).setOrigin(0.5);
       cont.add(dmgText);
-      this.tweens.add({
-        targets: dmgText, y: dmgText.y-40, alpha:0,
-        duration:600, ease:'Cubic.easeOut',
-        onComplete: () => dmgText.destroy()
+      this.tweens.add({targets:dmgText,y:dmgText.y-40,alpha:0,
+        duration:600,ease:'Cubic.easeOut',onComplete:()=>dmgText.destroy()});
+    
+      /* ───────── NEW : 넉백 ───────── */
+      const dstX = (info.x+.5)*this.tilemap.tileWidth;
+      const dstY = (info.y+.5)*this.tilemap.tileHeight;
+    
+      // 서버 좌표까지 바로 이동시키지 말고,
+      //  1) 60 ms 동안 반대방향으로 16 px 튕긴 뒤
+      //  2) 120 ms 에 서버 좌표로 수렴
+      const dirX = Phaser.Math.Clamp(dstX-cont.x,-1,1);
+      const dirY = Phaser.Math.Clamp(dstY-cont.y,-1,1);
+      const knockX = cont.x + dirX*16;
+      const knockY = cont.y + dirY*16;
+    
+      this.tweens.chain({
+        targets:cont,
+        tweens:[
+          {x:knockX,y:knockY,duration:60,ease:'Quad.easeOut'},
+          {x:dstX,y:dstY,duration:120,ease:'Quad.easeIn'}
+        ]
+      });
+    });
+
+    /* ────────── NEW: 몬스터→플레이어 전투 이벤트 ────────── */
+    this.socket.on('player_hit', (p:{id:number,dmg:number,hp:number})=>{
+      if (p.id !== this.meId) return;
+
+      // 장난감용 콘솔
+      console.log(`[HIT] ${p.id} -${p.dmg}  HP=${p.hp}`);
+
+      /* 👉 React(PhaserGame) 로 HP 패치 전송 */
+      this.events.emit('charUpdate', { hp: p.hp });
+
+      /* ── NEW: 빨간 플래시 & 살짝 밀림 ── */
+      // ① 섬광 오버레이
+      const flash = this.add.rectangle(0,0,this.cameras.main.width,
+                  this.cameras.main.height,0xff0000,1)
+                  .setOrigin(0).setScrollFactor(0).setDepth(99);
+      this.tweens.add({targets:flash,alpha:0,duration:120,
+                      onComplete:()=>flash.destroy()});
+
+      // ② 캐릭터 뒤로 점프-백
+      /*const dir = new Phaser.Math.Vector2(this.player.body!.velocity)
+                    .normalize().scale(-12);       // 반대방향 12 px
+      this.tweens.add({targets:this.player,x:'+'+dir.x,y:'+'+dir.y,
+                      yoyo:true,duration:90,ease:'Quad.easeOut'});*/
+    });
+
+    this.socket.on('player_respawn', (r:{
+      id:number, map_key:string, x:number, y:number, hp:number
+    })=>{
+      console.log(`[player_respawn] ${r.id} ${this.meId}`);
+      if (r.id !== this.meId) return;
+
+      console.log(`[player_respawn] ${r.id} ${this.currentMap} → ${r.map_key} ${r.x} ${r.y} ${r.hp}`);
+
+      /* 맵 전환·위치 이동은 기존 코드 그대로 */
+      this.loadMap(r.map_key as any,
+                  r.x/this.tilemap!.tileWidth - 0.5,
+                  r.y/this.tilemap!.tileHeight - 0.5);
+      this.player.setPosition(r.x, r.y);
+
+      /* 👉 HP 회복 & 좌표 패치 */
+      this.events.emit('charUpdate', {
+        hp : r.hp,
+        x  : r.x,
+        y  : r.y,
+        map_key : r.map_key
+      });
+    });
+
+    this.socket.on('exp_gain', (e:{
+      char_id:number, exp:number, total_exp:number, level:number, level_up?:boolean
+    })=>{
+      if (e.char_id !== this.meId) return;
+
+      console.log(`[EXP] +${e.exp} → Lv.${e.level}`);
+
+      /* 👉 EXP / 레벨 패치 */
+      this.events.emit('charUpdate', {
+        exp   : e.total_exp,
+        level : e.level
       });
 
-      /* ② 넉백(서버가 준 새 좌표까지 부드럽게) */
-      const dstX = (info.x + 0.5) * this.tilemap.tileWidth;
-      const dstY = (info.y + 0.5) * this.tilemap.tileHeight;
-      this.tweens.add({ targets:cont, x:dstX, y:dstY,
-                        duration:120, ease:'Linear' });
+      /* ───── 눈에 띄는 레벨-업 연출 ───── */
+      if (e.level_up){
+        /* 1) “LEVEL UP!” 텍스트 팝 */
+        const txt = this.add.text(
+          this.player.x, this.player.y - 120,
+          `LEVEL ${e.level} UP!`, {
+            fontSize : '42px',
+            fontStyle: 'bold',
+            color    : '#ffeb3b',
+            stroke   : '#000',
+            strokeThickness: 6
+          }
+        ).setOrigin(0.5).setScale(0).setDepth(10);
 
-      /* ③ HP 0이면 서버가 monster_despawn 보내므로
-            별도 처리 필요 없음 */
+        this.tweens.add({
+          targets  : txt,
+          scale    : 1,
+          y        : txt.y - 40,
+          alpha    : 0,
+          duration : 1500,
+          ease     : 'Back.easeOut',
+          onComplete: ()=>txt.destroy()
+        });
+
+        /* 2) 화이트-플래시 & 링-웨이브 */
+        this.cameras.main.flash(250, 255,255,255);
+
+        const ring = this.add.circle(
+          this.player.x, this.player.y, 0, 0xffff66, .3
+        ).setDepth(10);
+
+        this.tweens.add({
+          targets : ring,
+          radius  : 200,
+          alpha   : 0,
+          duration: 600,
+          ease    : 'Cubic.easeOut',
+          onComplete: ()=>ring.destroy()
+        });
+      }
     });
+    /* ─────────────────────────────────────────────────── */
 
     /* 스탠드/워크 애니메이션 */
     this.anims.create({
@@ -267,6 +403,9 @@ export class MyScene extends Phaser.Scene {
   /* 컨테이너 = [sprite, nameText] */
   private spawnOrUpdateMonster(m: any) {
     const existed = this.monsters.get(m.id)
+    if(!this.tilemap){             // 안전 가드
+      return;
+    }
     // ─ ① 타일 좌표 → 픽셀 좌표 변환
     const tx = (m.x + 0.5) * this.tilemap!.tileWidth   // 128 px 기준
     const ty = (m.y + 0.5) * this.tilemap!.tileHeight
@@ -294,8 +433,10 @@ export class MyScene extends Phaser.Scene {
     const label = this.add.text(0, -60, m.species,
       { fontSize: '14px', color: '#fff', stroke:'#000', strokeThickness:3 }
     ).setOrigin(0.5)
-  
+    const bar = this.add.graphics().fillStyle(0xff4444).fillRect(-32,-58,64,6);  
     const cont = this.add.container(tx, ty, [body, label]).setDepth(1)
+    cont.add(bar);
+    cont.setData('hpBar', bar);
     this.monsters.set(m.id, cont)
   }
 
@@ -332,6 +473,8 @@ export class MyScene extends Phaser.Scene {
     /* 이미 전환 중이면 무시 */
     if (this.isChangingMap) return
     this.isChangingMap = true               // ★ 전환 잠금
+
+    this.mapReady = false;
 
     /* ─ 이전 리소스 정리 ─ */
     this.playerCollider?.destroy()
@@ -409,6 +552,10 @@ export class MyScene extends Phaser.Scene {
     this.monsters.forEach((cont) => cont.destroy(true));
     this.monsters.clear();
 
+    this.mapReady = true;          // 이제 화면 그릴 준비 완료
+    this.monsterQueue.forEach(this.upsertMonster); // 큐 비우기
+    this.monsterQueue.length = 0;
+
     this.isChangingMap = false              // ★ 잠금 해제
   }
 
@@ -457,7 +604,9 @@ export class MyScene extends Phaser.Scene {
     const vy = (this.cursors.up?.isDown ? -1 : this.cursors.down?.isDown ? 1 : 0) * speed
     this.player.setVelocity(vx, vy)
 
-    this.player.play(vx || vy ? 'walk' : 'stand', true)
+    if (this.anims.exists('stand')) {      // ← 추가
+      this.player.play(vx || vy ? 'walk' : 'stand', true);
+    }                                       // ← 추가
 
     // 전환 중엔 move 패킷 보내지 않음
     if (!this.isChangingMap && (vx || vy)) {

@@ -97,16 +97,23 @@ export default function PhaserGame() {
     const onBgm    = (on: boolean) => setBgmOn(on)
     const onNpc    = (n: NpcDTO)   => setTalkNpc(n)
 
+    const onCharUpd  = (patch:Partial<CharacterDTO>)=>{
+      // immer 등이 없다면 간단히 shallow merge
+      setChar(prev => prev ? { ...prev, ...patch } : prev);
+    };
+
     scene.events.on('mapKey',   onMapKey)
     scene.events.on('coords',   onCoords)
     scene.events.on('bgmState', onBgm)
     scene.events.on('openNpcDialog', onNpc)
+    scene.events.on('charUpdate', onCharUpd);
 
     return () => {
       scene.events.off('mapKey',   onMapKey)
       scene.events.off('coords',   onCoords)
       scene.events.off('bgmState', onBgm)
       scene.events.off('openNpcDialog', onNpc)
+      scene.events.off('charUpdate', onCharUpd);
     }
   }, [gameRef.current])
 

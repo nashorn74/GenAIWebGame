@@ -325,6 +325,11 @@ class Monster(db.Model):
     drop_item_id = db.Column(db.Integer, db.ForeignKey('items.id'))
     drop_item    = db.relationship('Item', lazy=True)
 
+    ### NEW ─────────────────────────────────────────────
+    target_char_id = db.Column(db.Integer, db.ForeignKey('characters.id'))
+    # 관계는 굳이 만들 필요 없음 (읽기 전용 값)
+    ### ─────────────────────────────────────────────────
+
     is_alive  = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
