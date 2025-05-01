@@ -145,6 +145,12 @@ export class MyScene extends Phaser.Scene {
     this.socket.io.on('reconnect_error', console.error)
     this.socket.io.on('reconnect_failed', console.error)
 
+    this.socket.on("chat_message", (msg: { sender:string; text:string; ts:number }) => {
+      console.log("chat_message!!!!!!!");
+      console.log(msg);
+      this.events.emit("chat_message", msg)
+    })
+
     /* 3. 연결 후에 join_map 보내는지 확인 */
     this.socket.on('connect', () => {
       console.log('[socket] connected id=', this.socket.id)

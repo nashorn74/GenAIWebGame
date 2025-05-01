@@ -21,6 +21,7 @@ from random import choice, shuffle
 from typing import Any
 import os, redis
 import time
+import json
 
 knockback_until: dict[int, float] = {}   # {monster_id: unix_timestamp}
 last_move_sent: dict[int, float] = {}   # {char_id: unix_ts}
@@ -124,6 +125,54 @@ def create_app():
         if exc:
             db.session.rollback()  # D: 예외 시 롤백
         db.session.remove()
+
+    # ──────────────────────────────────────────────────────────
+    # Redis Pub/Sub 구독용 백그라운드 루프
+    # ──────────────────────────────────────────────────────────
+    def chat_listener():
+        pubsub = r.pubsub(ignore_subscribe_messages=True)
+        pubsub.subscribe("global_chat")
+        while True:
+            msg = pubsub.get_message(timeout=1.0)
+            if msg and msg['type'] == 'message':
+                print("recieved message -------------")
+                print(msg['data'])
+                print("------------------------------")
+                data = json.loads(msg['data'])
+                socketio.emit("chat_message", data)
+
+            socketio.sleep(0.01)
+    
+    # 백그라운드로 시작
+    socketio.start_background_task(chat_listener)
+
+    # ──────────────────────────────────────────────────────────
+    # 클라이언트로부터 채팅 메시지 수신 핸들러
+    # ──────────────────────────────────────────────────────────
+    @socketio.on("chat_message")
+    def handle_chat_message(data):
+        """
+        data = {
+          "sender_id": <int>,
+          "text":      <string>
+        }
+        """
+        # 보낸 사람 이름 조회
+        sender_id = data.get("sender_id")
+        char = db.session.get(Character, sender_id) if sender_id else None
+        sender_name = char.name if char else "Unknown"
+        msg = {
+            "sender"   : sender_name,
+            "text"     : data.get("text", ""),
+            "ts"       : int(time.time())
+        }
+        print("publish message =============")
+        print(msg)
+        print("=============================")
+        # Redis 채널로 발행 (모든 프로세스가 SUBSCRIBE하고 있음)
+        r.publish("global_chat", json.dumps(msg))
+        # (선택) 보낸 사람에게 확인 응답
+        emit("chat_ack", {"ok": True})
 
     # ─────────────────────────────────────────────
     #  🐾  몬스터 랜덤 이동 루프 (2초 간격)
@@ -310,8 +359,9 @@ def create_app():
                 with app.app_context():        # 롤백도 컨텍스트 안에서
                     db.session.rollback()
                 raise
-            #finally:
-            #    db.session.remove()
+            finally:
+                with app.app_context():
+                    db.session.remove()
 
     def random_step(x: int, y: int, walkable: set[tuple[int,int]]):
         cand = [(x+1,y), (x-1,y), (x,y+1), (x,y-1)]
@@ -526,15 +576,34 @@ def create_app():
     # ③ 맵 퇴장 또는 브라우저 종료
     @socketio.on('disconnect')
     def on_disconnect():
-        sid = request.sid
-        char_id = remove_sid(sid)                  # ▸ 해시에서 깨끗이 제거
-        if char_id is None:
+        try:
+            # 현재 세션에서 sid 가져오기 시도
+            sid = request.sid
+        except Exception:
+            # 실패 시 기본 에러 처리
+            print("disconnect 중 오류 발생 - SID를 얻을 수 없음")
             return
+        
+        # Redis 또는 데이터베이스에서 모든 키를 문자열로 처리하도록 조정
+        try:
+            char_id = remove_sid(sid)
+            if char_id is None:
+                return
+                
+            # 모든 ID를 문자열로 안전하게 변환
+            safe_char_id = str(char_id.decode('utf-8') if isinstance(char_id, bytes) else char_id)
+            
+            map_key = get_map_by_sid(sid) or "unknown"
+            safe_map_key = str(map_key.decode('utf-8') if isinstance(map_key, bytes) else map_key)
+            
+            # 안전한 값으로 이벤트 발송
+            room_name = f"map_{safe_map_key}"
+            leave_room(room_name, sid=sid)
+            emit("player_despawn", {"id": safe_char_id}, room=room_name)
+            print(f"disconnect sid={sid} char_id={safe_char_id} map_key={safe_map_key}")
+        except Exception as e:
+            print(f"disconnect 처리 중 오류 발생: {e}")
 
-        map_key = get_map_by_sid(sid) or "unknown"
-        leave_room(f"map_{map_key}", sid=sid)
-        emit("player_despawn", {"id": char_id}, room=f"map_{map_key}")
-        print(f"disconnect {sid=} {char_id=}")
 
     # Blueprint 등록
     app.register_blueprint(api_bp, url_prefix='/api')

@@ -8,6 +8,8 @@ import React, {
 } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Phaser from 'phaser'
+import dayjs from "dayjs"
+import { io, Socket } from 'socket.io-client';
 
 import { MyScene } from './MyScene'
 import MenuPopover  from './ui/MenuPopover'
@@ -45,6 +47,11 @@ export default function PhaserGame() {
   const [shopNpc , setShopNpc ] = useState<NpcDTO|null>(null)
   const [invOpen , setInvOpen ] = useState(false)
 
+  const [chatMessages, setChatMessages] = useState<{sender:string, text:string, ts:number}[]>([])
+  const [chatInput, setChatInput]     = useState("")
+  // ① 채팅 로그 div ref
+  const logRef = useRef<HTMLDivElement>(null)
+
   const refreshChar = ()=> {
     if(char) fetchCharacter(char.id).then(setChar)
   }
@@ -77,6 +84,46 @@ export default function PhaserGame() {
 
     return () => gameRef.current?.destroy(true)
   }, [])
+
+  // ① onChat 콜백을 바깥에서 선언
+  const onChat = React.useCallback((msg:{sender:string,text:string,ts:number}) => {
+    console.log("💬 received in React:", msg)
+    setChatMessages(ms => [...ms, msg].slice(-100))
+  }, [])
+
+  // ③ chatMessages 가 바뀔 때마다 스크롤을 맨 아래로
+  useEffect(() => {
+    const div = logRef.current
+    if (div) {
+      div.scrollTop = div.scrollHeight
+    }
+  }, [chatMessages])
+
+  // ─── 채팅 바인딩 ───
+  // mapKey 가 바뀔 때마다(최초 로드맵 완료 시) 씬이 준비됐다고 보고 chat_message 이벤트를 등록
+  useEffect(() => {
+    const scene = gameRef.current?.scene.getScene('my-scene') as MyScene|undefined
+    if (!scene) return
+
+    // 중복 등록 방지 차원에서 off 한 번
+    scene.events.off('chat_message', onChat)
+    scene.events.on('chat_message', onChat)
+
+    return () => {
+      scene.events.off('chat_message', onChat)
+    }
+  }, [mapKey, onChat])
+
+  // 메시지 전송 함수
+  const sendChat = () => {
+    if (!chatInput.trim()) return
+    const scene = gameRef.current?.scene.getScene("my-scene") as any
+    scene.socket.emit("chat_message", {
+      sender_id: Number(sessionStorage.getItem("charId")),
+      text: chatInput
+    })
+    setChatInput("")
+  }
 
   /* ────── 캐릭터 정보 불러오기 ────── */
   useEffect(() => {
@@ -175,6 +222,63 @@ export default function PhaserGame() {
             {mapKey} ({coords.x},{coords.y})
           </div>
         </header>
+
+        {/* ─── 채팅창 ─── */}
+        <div style={{
+          position: "absolute",
+          bottom: 56,      // 스킬바 위쪽
+          left:   12,
+          right:  12,
+          maxHeight: 200,
+          background: "rgba(0,0,0,0.6)",
+          color: "#fff",
+          fontSize: 14,
+          display: "flex",
+          flexDirection: "column",
+          zIndex: 20,
+          padding: "4px"
+        }}>
+          {/* 메시지 로그 */}
+          <div
+            ref={logRef}                       // ① ref 달기 
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              marginBottom: 4,
+              whiteSpace: "pre-wrap"           // ② 공백 보존
+            }}
+          >
+            {chatMessages.map((m, i) => (
+              <div key={i}>
+                <strong>{m.sender}</strong>{" "}
+                <span>[{dayjs.unix(m.ts).format("HH:mm")}]:</span>{" "}
+                {m.text}
+              </div>
+            ))}
+          </div>
+          {/* 입력 박스 + 버튼 */}
+          <div style={{ display: "flex", gap: 4 }}>
+            <textarea
+              style={{
+                flex: 1,
+                padding: "4px",
+                resize: "none",
+                whiteSpace: "pre-wrap"    // 연속 공백 & 개행 보존
+              }}
+              value={chatInput}
+              placeholder="메시지를 입력하세요. Shift+Enter로 줄바꿈"
+              onChange={e => setChatInput(e.target.value)}
+              onKeyDown={e => {
+                // ② Enter 처리
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  sendChat()
+                }
+              }}
+            />
+            <button onClick={sendChat}>전송</button>
+          </div>
+        </div>
 
         {/* ─── 하단 오른쪽 버튼 영역 ─── */}
         <div
