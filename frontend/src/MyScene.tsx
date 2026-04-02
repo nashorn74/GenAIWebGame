@@ -3,6 +3,7 @@ import { MapTeleport, fetchMapData } from './utils/map'
 import { fetchNpcs, NpcDTO } from './utils/npc'
 import { io, Socket } from 'socket.io-client';
 import { CharacterDTO } from './utils/character'
+import { playHitSfx, playPlayerHitSfx, playKillSfx } from './utils/sfx'
 
 type MapKey = 'worldmap' | 'city2' | 'dungeon1'
 const TALK_DIST   = 48   // 대화 시작
@@ -221,24 +222,35 @@ export class MyScene extends Phaser.Scene {
       const cont = this.monsters.get(info.id);
       if (!cont || !this.tilemap) return;
     
-      /* ① 카메라 & 히트-스톱 */
-      this.cameras.main.shake(100,.01);
+      /* ① 카메라 & 히트-스톱 + SFX */
+      const isFatal = info.hp <= 0;
+      if (isFatal) { playKillSfx(); } else { playHitSfx(); }
+
+      this.cameras.main.shake(isFatal ? 180 : 100, isFatal ? 0.02 : 0.01);
       this.time.timeScale=.05;
-      this.time.delayedCall(80,()=>this.time.timeScale=1);
-    
+      this.time.delayedCall(isFatal ? 120 : 80,()=>this.time.timeScale=1);
+
       /* ② HP 바 */
       const bar = cont.getData('hpBar') as Phaser.GameObjects.Graphics;
       if (bar){
         const ratio = info.hp / (this.monstersMeta[info.id]?.max_hp??info.hp);
         this.tweens.add({targets:bar,scaleX:ratio,duration:120,ease:'Linear'});
       }
-    
-      /* ③ 데미지 텍스트 */
-      const dmgText = this.add.text(0,-80,`-${info.dmg}`,{fontSize:'28px',
-        color:'#ff4444',stroke:'#000',strokeThickness:4}).setOrigin(0.5);
+
+      /* ③ 데미지 텍스트 — 큰 데미지일수록 크고 밝게 */
+      const maxHp = this.monstersMeta[info.id]?.max_hp ?? 100;
+      const dmgRatio = info.dmg / maxHp;
+      const isBig = dmgRatio >= 0.15;
+      const fontSize = isBig ? '38px' : '28px';
+      const color = isBig ? '#ffcc00' : '#ff4444';
+
+      const dmgText = this.add.text(0,-80,`-${info.dmg}`,{fontSize,
+        color,stroke:'#000',strokeThickness:4,fontStyle: isBig ? 'bold' : 'normal'}).setOrigin(0.5);
+      if (isBig) dmgText.setScale(1.3);
       cont.add(dmgText);
-      this.tweens.add({targets:dmgText,y:dmgText.y-40,alpha:0,
-        duration:600,ease:'Cubic.easeOut',onComplete:()=>dmgText.destroy()});
+      this.tweens.add({targets:dmgText,y:dmgText.y-50,alpha:0,
+        scale: isBig ? 0.6 : 0.8,
+        duration:800,ease:'Cubic.easeOut',onComplete:()=>dmgText.destroy()});
     
       /* ───────── NEW : 넉백 ───────── */
       const dstX = (info.x+.5)*this.tilemap.tileWidth;
@@ -271,19 +283,36 @@ export class MyScene extends Phaser.Scene {
       /* 👉 React(PhaserGame) 로 HP 패치 전송 */
       this.events.emit('charUpdate', { hp: p.hp });
 
-      /* ── NEW: 빨간 플래시 & 살짝 밀림 ── */
+      /* ── 빨간 플래시 & 넉백 + SFX ── */
+      playPlayerHitSfx();
+
       // ① 섬광 오버레이
       const flash = this.add.rectangle(0,0,this.cameras.main.width,
-                  this.cameras.main.height,0xff0000,1)
+                  this.cameras.main.height,0xff0000,0.6)
                   .setOrigin(0).setScrollFactor(0).setDepth(99);
-      this.tweens.add({targets:flash,alpha:0,duration:120,
+      this.tweens.add({targets:flash,alpha:0,duration:180,
                       onComplete:()=>flash.destroy()});
 
-      // ② 캐릭터 뒤로 점프-백
-      /*const dir = new Phaser.Math.Vector2(this.player.body!.velocity)
-                    .normalize().scale(-12);       // 반대방향 12 px
-      this.tweens.add({targets:this.player,x:'+'+dir.x,y:'+'+dir.y,
-                      yoyo:true,duration:90,ease:'Quad.easeOut'});*/
+      // ② 카메라 흔들림
+      this.cameras.main.shake(80, 0.008);
+
+      // ③ 캐릭터 뒤로 점프-백
+      const vel = this.player.body?.velocity;
+      if (vel && (vel.x || vel.y)) {
+        const dir = new Phaser.Math.Vector2(vel).normalize().scale(-14);
+        this.tweens.add({targets:this.player,
+          x: this.player.x + dir.x, y: this.player.y + dir.y,
+          yoyo:true,duration:100,ease:'Quad.easeOut'});
+      }
+
+      // ④ 데미지 텍스트 (플레이어 머리 위)
+      const pDmgText = this.add.text(
+        this.player.x, this.player.y - 80,
+        `-${p.dmg}`, {fontSize:'30px', color:'#ff6666',
+        stroke:'#000', strokeThickness:4}
+      ).setOrigin(0.5).setDepth(10);
+      this.tweens.add({targets:pDmgText, y:pDmgText.y-45, alpha:0,
+        duration:700, ease:'Cubic.easeOut', onComplete:()=>pDmgText.destroy()});
     });
 
     this.socket.on('player_respawn', (r:{
