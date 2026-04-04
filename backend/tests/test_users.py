@@ -1,9 +1,10 @@
 def _create_user(client, username="admin001"):
-    client.post("/auth/register", json={
+    reg = client.post("/auth/register", json={
         "username": username,
         "password": "abcd1234",
         "password_confirm": "abcd1234",
     })
+    assert reg.status_code == 201, f"Registration failed: {reg.get_json()}"
     return client.get("/api/users").get_json()[-1]["id"]
 
 

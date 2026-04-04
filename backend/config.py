@@ -11,7 +11,7 @@ class Config:
     )
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SECRET_KEY = "some_random_secret_key"
+    SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-fallback-key")
 
     # ──────────────────────────────────────────────
     # NEW: DB Connection-Pool 설정

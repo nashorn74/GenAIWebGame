@@ -3,15 +3,18 @@ from models import db, User
 
 
 def _register(client, username="charuser1"):
-    client.post("/auth/register", json={
+    reg = client.post("/auth/register", json={
         "username": username,
         "password": "abcd1234",
         "password_confirm": "abcd1234",
     })
-    return client.post("/auth/login", json={
+    assert reg.status_code == 201, f"Registration failed: {reg.get_json()}"
+    login = client.post("/auth/login", json={
         "username": username,
         "password": "abcd1234",
-    }).get_json()["user"]["id"]
+    })
+    assert login.status_code == 200, f"Login failed: {login.get_json()}"
+    return login.get_json()["user"]["id"]
 
 
 def test_create_warrior(client):

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 describe('map utils', () => {
   beforeEach(() => {
+    vi.resetModules()
     vi.restoreAllMocks()
   })
 
@@ -16,10 +17,10 @@ describe('map utils', () => {
         teleports: [{ from: { x: 5, y: 0 }, to_map: 'worldmap', to_position: [10, 10] }],
       }),
     }
-    global.fetch = vi.fn().mockResolvedValue({
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(serverResponse),
-    })
+    }))
 
     const { fetchMapData } = await import('../map')
     const result = await fetchMapData('city2')
@@ -29,13 +30,10 @@ describe('map utils', () => {
   })
 
   it('fetchMapData defaults when map_data has no fields', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({
-        key: 'empty',
-        map_data: '{}',
-      }),
-    })
+      json: () => Promise.resolve({ key: 'empty', map_data: '{}' }),
+    }))
 
     const { fetchMapData } = await import('../map')
     const result = await fetchMapData('empty')
@@ -44,7 +42,7 @@ describe('map utils', () => {
   })
 
   it('fetchMapData throws on fetch error', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
 
     const { fetchMapData } = await import('../map')
     await expect(fetchMapData('bad')).rejects.toThrow('map fetch err')

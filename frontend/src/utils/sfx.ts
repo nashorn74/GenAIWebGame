@@ -3,74 +3,71 @@
  * 오디오 파일 없이 사운드를 생성한다.
  */
 
+interface ToneConfig {
+  type: OscillatorType;
+  freqStart: number;
+  freqEnd: number;
+  volume: number;
+  duration: number;
+}
+
+const SFX_CONFIG = {
+  hit:       { type: 'square'   as OscillatorType, freqStart: 200, freqEnd:  80, volume: 0.25, duration: 0.12 },
+  playerHit: { type: 'sawtooth' as OscillatorType, freqStart: 300, freqEnd: 100, volume: 0.2,  duration: 0.15 },
+  killBass:  { type: 'sine'     as OscillatorType, freqStart: 150, freqEnd:  40, volume: 0.3,  duration: 0.3  },
+  killClick: { type: 'square'   as OscillatorType, freqStart: 600, freqEnd: 200, volume: 0.15, duration: 0.15 },
+} as const;
+
 let ctx: AudioContext | null = null;
 
-function getCtx(): AudioContext {
-  if (!ctx) ctx = new AudioContext();
+function getCtx(): AudioContext | null {
+  if (!ctx) {
+    try {
+      ctx = new AudioContext();
+    } catch {
+      return null;
+    }
+  }
+  if (ctx.state === 'suspended') {
+    ctx.resume();
+  }
   return ctx;
+}
+
+function playTone(ac: AudioContext, cfg: ToneConfig) {
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.connect(gain).connect(ac.destination);
+
+  osc.type = cfg.type;
+  osc.frequency.setValueAtTime(cfg.freqStart, ac.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(cfg.freqEnd, ac.currentTime + cfg.duration);
+
+  gain.gain.setValueAtTime(cfg.volume, ac.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + cfg.duration);
+
+  osc.start(ac.currentTime);
+  osc.stop(ac.currentTime + cfg.duration);
 }
 
 /** 플레이어가 몬스터를 타격할 때 */
 export function playHitSfx() {
   const ac = getCtx();
-  const osc = ac.createOscillator();
-  const gain = ac.createGain();
-  osc.connect(gain).connect(ac.destination);
-
-  osc.type = 'square';
-  osc.frequency.setValueAtTime(200, ac.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(80, ac.currentTime + 0.08);
-
-  gain.gain.setValueAtTime(0.25, ac.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.12);
-
-  osc.start(ac.currentTime);
-  osc.stop(ac.currentTime + 0.12);
+  if (!ac) return;
+  playTone(ac, SFX_CONFIG.hit);
 }
 
 /** 몬스터가 플레이어를 타격할 때 */
 export function playPlayerHitSfx() {
   const ac = getCtx();
-  const osc = ac.createOscillator();
-  const gain = ac.createGain();
-  osc.connect(gain).connect(ac.destination);
-
-  osc.type = 'sawtooth';
-  osc.frequency.setValueAtTime(300, ac.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(100, ac.currentTime + 0.15);
-
-  gain.gain.setValueAtTime(0.2, ac.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.15);
-
-  osc.start(ac.currentTime);
-  osc.stop(ac.currentTime + 0.15);
+  if (!ac) return;
+  playTone(ac, SFX_CONFIG.playerHit);
 }
 
 /** 몬스터 사망 시 */
 export function playKillSfx() {
   const ac = getCtx();
-
-  // 낮은 폭발음
-  const osc1 = ac.createOscillator();
-  const gain1 = ac.createGain();
-  osc1.connect(gain1).connect(ac.destination);
-  osc1.type = 'sine';
-  osc1.frequency.setValueAtTime(150, ac.currentTime);
-  osc1.frequency.exponentialRampToValueAtTime(40, ac.currentTime + 0.3);
-  gain1.gain.setValueAtTime(0.3, ac.currentTime);
-  gain1.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.3);
-  osc1.start(ac.currentTime);
-  osc1.stop(ac.currentTime + 0.3);
-
-  // 높은 찰칵음
-  const osc2 = ac.createOscillator();
-  const gain2 = ac.createGain();
-  osc2.connect(gain2).connect(ac.destination);
-  osc2.type = 'square';
-  osc2.frequency.setValueAtTime(600, ac.currentTime);
-  osc2.frequency.exponentialRampToValueAtTime(200, ac.currentTime + 0.15);
-  gain2.gain.setValueAtTime(0.15, ac.currentTime);
-  gain2.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.15);
-  osc2.start(ac.currentTime);
-  osc2.stop(ac.currentTime + 0.15);
+  if (!ac) return;
+  playTone(ac, SFX_CONFIG.killBass);
+  playTone(ac, SFX_CONFIG.killClick);
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 describe('items utils', () => {
   beforeEach(() => {
+    vi.resetModules()
     vi.restoreAllMocks()
   })
 
@@ -11,10 +12,10 @@ describe('items utils', () => {
       { id: 2, name: 'Jelly', buy_price: 0, sell_price: 5 },
       { id: 3, name: 'Potion', buy_price: 10, sell_price: 0 },
     ]
-    global.fetch = vi.fn().mockResolvedValue({
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(allItems),
-    })
+    }))
 
     const { fetchShopItems } = await import('../items')
     const result = await fetchShopItems()
@@ -25,14 +26,12 @@ describe('items utils', () => {
   it('fetchInventory returns character items', async () => {
     const charData = {
       id: 1,
-      items: [
-        { id: 10, item_id: 1, quantity: 3, item: { name: 'Sword' } },
-      ],
+      items: [{ id: 10, item_id: 1, quantity: 3, item: { name: 'Sword' } }],
     }
-    global.fetch = vi.fn().mockResolvedValue({
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(charData),
-    })
+    }))
 
     const { fetchInventory } = await import('../items')
     const result = await fetchInventory(1)
@@ -41,10 +40,10 @@ describe('items utils', () => {
   })
 
   it('buyItem sends correct POST body', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ message: 'ok' }),
-    })
+    }))
 
     const { buyItem } = await import('../items')
     await buyItem(10, 1, 5, 2)
@@ -52,22 +51,20 @@ describe('items utils', () => {
     const [url, opts] = (fetch as any).mock.calls[0]
     expect(url).toContain('/api/shops/10/buy')
     expect(opts.method).toBe('POST')
-    const body = JSON.parse(opts.body)
-    expect(body).toEqual({ character_id: 1, item_id: 5, quantity: 2 })
+    expect(JSON.parse(opts.body)).toEqual({ character_id: 1, item_id: 5, quantity: 2 })
   })
 
   it('sellItem sends correct POST body', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ message: 'ok' }),
-    })
+    }))
 
     const { sellItem } = await import('../items')
     await sellItem(10, 1, 3, 4)
 
     const [url, opts] = (fetch as any).mock.calls[0]
     expect(url).toContain('/api/shops/10/sell')
-    const body = JSON.parse(opts.body)
-    expect(body).toEqual({ character_id: 1, item_id: 3, quantity: 4 })
+    expect(JSON.parse(opts.body)).toEqual({ character_id: 1, item_id: 3, quantity: 4 })
   })
 })
