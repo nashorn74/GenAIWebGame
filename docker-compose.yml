@@ -32,6 +32,7 @@ services:
       - DATABASE_URI=postgresql://myuser:mypass@db:5432/my_database
       - REDIS_URL=redis://redis:6379/0
       - EVENTLET_NO_GREENDNS=yes
+      - SECRET_KEY=${SECRET_KEY:-dev-fallback-key}
     depends_on:
       - db
       - redis

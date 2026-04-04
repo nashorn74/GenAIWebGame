@@ -11,7 +11,9 @@ class Config:
     )
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SECRET_KEY = "some_random_secret_key"
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+    if not SECRET_KEY:
+        raise RuntimeError("SECRET_KEY environment variable is required")
 
     # ──────────────────────────────────────────────
     # NEW: DB Connection-Pool 설정

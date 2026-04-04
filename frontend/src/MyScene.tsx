@@ -3,10 +3,39 @@ import { MapTeleport, fetchMapData } from './utils/map'
 import { fetchNpcs, NpcDTO } from './utils/npc'
 import { io, Socket } from 'socket.io-client';
 import { CharacterDTO } from './utils/character'
+import { playHitSfx, playPlayerHitSfx, playKillSfx } from './utils/sfx'
 
 type MapKey = 'worldmap' | 'city2' | 'dungeon1'
 const TALK_DIST   = 48   // 대화 시작
 const RESET_DIST  = 64   // 다시 대화 가능해지는 거리
+
+// Combat feedback constants
+const DAMAGE_THRESHOLD  = 0.15
+const DMG_FONT_BIG      = '38px'
+const DMG_FONT_NORMAL   = '28px'
+const DMG_COLOR_BIG     = '#ffcc00'
+const DMG_COLOR_NORMAL  = '#ff4444'
+const DMG_SCALE_BIG     = 1.3
+const SHAKE_DUR_FATAL   = 180
+const SHAKE_DUR_HIT     = 100
+const SHAKE_INT_FATAL   = 0.02
+const SHAKE_INT_HIT     = 0.01
+const HITSTOP_FATAL     = 120
+const HITSTOP_HIT       = 80
+const KNOCKBACK_PX      = 16
+const PLAYER_KNOCKBACK_PX = 14
+const PLAYER_FLASH_COLOR  = 0xff0000
+const PLAYER_FLASH_ALPHA  = 0.6
+const PLAYER_FLASH_DUR    = 180
+const PLAYER_SHAKE_DUR    = 80
+const PLAYER_SHAKE_INT    = 0.008
+const PLAYER_KB_DUR       = 100
+const PLAYER_DMG_COLOR    = '#ff6666'
+const PLAYER_DMG_FONT     = '30px'
+const PLAYER_DMG_STROKE   = 4
+const PLAYER_DMG_YOFF     = 80
+const PLAYER_DMG_FLOAT    = 45
+const PLAYER_DMG_FLOAT_DUR = 700
 
 export class MyScene extends Phaser.Scene {
   /* ▽▽ 필드 ▽▽ */
@@ -221,24 +250,38 @@ export class MyScene extends Phaser.Scene {
       const cont = this.monsters.get(info.id);
       if (!cont || !this.tilemap) return;
     
-      /* ① 카메라 & 히트-스톱 */
-      this.cameras.main.shake(100,.01);
+      /* ① 카메라 & 히트-스톱 + SFX */
+      const isFatal = info.hp <= 0;
+      if (isFatal) { playKillSfx().catch(() => {}); } else { playHitSfx().catch(() => {}); }
+
+      this.cameras.main.shake(
+        isFatal ? SHAKE_DUR_FATAL : SHAKE_DUR_HIT,
+        isFatal ? SHAKE_INT_FATAL : SHAKE_INT_HIT);
       this.time.timeScale=.05;
-      this.time.delayedCall(80,()=>this.time.timeScale=1);
-    
+      this.time.delayedCall(isFatal ? HITSTOP_FATAL : HITSTOP_HIT,()=>this.time.timeScale=1);
+
       /* ② HP 바 */
       const bar = cont.getData('hpBar') as Phaser.GameObjects.Graphics;
       if (bar){
-        const ratio = info.hp / (this.monstersMeta[info.id]?.max_hp??info.hp);
+        const hpMax = this.monstersMeta[info.id]?.max_hp ?? 1;
+        const ratio = Math.max(0, info.hp / hpMax);
         this.tweens.add({targets:bar,scaleX:ratio,duration:120,ease:'Linear'});
       }
-    
-      /* ③ 데미지 텍스트 */
-      const dmgText = this.add.text(0,-80,`-${info.dmg}`,{fontSize:'28px',
-        color:'#ff4444',stroke:'#000',strokeThickness:4}).setOrigin(0.5);
+
+      /* ③ 데미지 텍스트 — 큰 데미지일수록 크고 밝게 */
+      const maxHp = this.monstersMeta[info.id]?.max_hp ?? 1;
+      const dmgRatio = info.dmg / maxHp;
+      const isBig = dmgRatio >= DAMAGE_THRESHOLD;
+      const fontSize = isBig ? DMG_FONT_BIG : DMG_FONT_NORMAL;
+      const color = isBig ? DMG_COLOR_BIG : DMG_COLOR_NORMAL;
+
+      const dmgText = this.add.text(0,-80,`-${info.dmg}`,{fontSize,
+        color,stroke:'#000',strokeThickness:4,fontStyle: isBig ? 'bold' : 'normal'}).setOrigin(0.5);
+      if (isBig) dmgText.setScale(DMG_SCALE_BIG);
       cont.add(dmgText);
-      this.tweens.add({targets:dmgText,y:dmgText.y-40,alpha:0,
-        duration:600,ease:'Cubic.easeOut',onComplete:()=>dmgText.destroy()});
+      this.tweens.add({targets:dmgText,y:dmgText.y-50,alpha:0,
+        scale: isBig ? 0.6 : 0.8,
+        duration:800,ease:'Cubic.easeOut',onComplete:()=>dmgText.destroy()});
     
       /* ───────── NEW : 넉백 ───────── */
       const dstX = (info.x+.5)*this.tilemap.tileWidth;
@@ -249,8 +292,8 @@ export class MyScene extends Phaser.Scene {
       //  2) 120 ms 에 서버 좌표로 수렴
       const dirX = Phaser.Math.Clamp(dstX-cont.x,-1,1);
       const dirY = Phaser.Math.Clamp(dstY-cont.y,-1,1);
-      const knockX = cont.x + dirX*16;
-      const knockY = cont.y + dirY*16;
+      const knockX = cont.x + dirX*KNOCKBACK_PX;
+      const knockY = cont.y + dirY*KNOCKBACK_PX;
     
       this.tweens.chain({
         targets:cont,
@@ -271,19 +314,46 @@ export class MyScene extends Phaser.Scene {
       /* 👉 React(PhaserGame) 로 HP 패치 전송 */
       this.events.emit('charUpdate', { hp: p.hp });
 
-      /* ── NEW: 빨간 플래시 & 살짝 밀림 ── */
+      /* ── 빨간 플래시 & 넉백 + SFX ── */
+      playPlayerHitSfx().catch(() => {});
+
       // ① 섬광 오버레이
       const flash = this.add.rectangle(0,0,this.cameras.main.width,
-                  this.cameras.main.height,0xff0000,1)
+                  this.cameras.main.height,PLAYER_FLASH_COLOR,PLAYER_FLASH_ALPHA)
                   .setOrigin(0).setScrollFactor(0).setDepth(99);
-      this.tweens.add({targets:flash,alpha:0,duration:120,
+      this.tweens.add({targets:flash,alpha:0,duration:PLAYER_FLASH_DUR,
                       onComplete:()=>flash.destroy()});
 
-      // ② 캐릭터 뒤로 점프-백
-      /*const dir = new Phaser.Math.Vector2(this.player.body!.velocity)
-                    .normalize().scale(-12);       // 반대방향 12 px
-      this.tweens.add({targets:this.player,x:'+'+dir.x,y:'+'+dir.y,
-                      yoyo:true,duration:90,ease:'Quad.easeOut'});*/
+      // ② 카메라 흔들림
+      this.cameras.main.shake(PLAYER_SHAKE_DUR, PLAYER_SHAKE_INT);
+
+      // ③ 캐릭터 뒤로 점프-백
+      const vel = this.player.body?.velocity;
+      let dir: Phaser.Math.Vector2;
+      if (vel && (vel.x || vel.y)) {
+        dir = new Phaser.Math.Vector2(vel).normalize().scale(-PLAYER_KNOCKBACK_PX);
+      } else if (this.player.body) {
+        // 정지 상태 피격 — 랜덤 방향으로 넉백
+        const angle = Math.random() * Math.PI * 2;
+        dir = new Phaser.Math.Vector2(Math.cos(angle), Math.sin(angle)).scale(PLAYER_KNOCKBACK_PX);
+      } else {
+        console.warn('player_hit: player.body is null, skipping knockback');
+        dir = Phaser.Math.Vector2.ZERO;
+      }
+      if (dir.x || dir.y) {
+        this.tweens.add({targets:this.player,
+          x: this.player.x + dir.x, y: this.player.y + dir.y,
+          yoyo:true,duration:PLAYER_KB_DUR,ease:'Quad.easeOut'});
+      }
+
+      // ④ 데미지 텍스트 (플레이어 머리 위)
+      const pDmgText = this.add.text(
+        this.player.x, this.player.y - PLAYER_DMG_YOFF,
+        `-${p.dmg}`, {fontSize:PLAYER_DMG_FONT, color:PLAYER_DMG_COLOR,
+        stroke:'#000', strokeThickness:PLAYER_DMG_STROKE}
+      ).setOrigin(0.5).setDepth(10);
+      this.tweens.add({targets:pDmgText, y:pDmgText.y-PLAYER_DMG_FLOAT, alpha:0,
+        duration:PLAYER_DMG_FLOAT_DUR, ease:'Cubic.easeOut', onComplete:()=>pDmgText.destroy()});
     });
 
     this.socket.on('player_respawn', (r:{
