@@ -1,3 +1,6 @@
+import os
+os.environ.setdefault("SECRET_KEY", "test-secret")
+
 import pytest
 from flask import Flask
 from flask_cors import CORS

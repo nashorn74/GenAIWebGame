@@ -252,7 +252,7 @@ export class MyScene extends Phaser.Scene {
     
       /* ① 카메라 & 히트-스톱 + SFX */
       const isFatal = info.hp <= 0;
-      if (isFatal) { playKillSfx(); } else { playHitSfx(); }
+      if (isFatal) { playKillSfx().catch(() => {}); } else { playHitSfx().catch(() => {}); }
 
       this.cameras.main.shake(
         isFatal ? SHAKE_DUR_FATAL : SHAKE_DUR_HIT,
@@ -315,7 +315,7 @@ export class MyScene extends Phaser.Scene {
       this.events.emit('charUpdate', { hp: p.hp });
 
       /* ── 빨간 플래시 & 넉백 + SFX ── */
-      playPlayerHitSfx();
+      playPlayerHitSfx().catch(() => {});
 
       // ① 섬광 오버레이
       const flash = this.add.rectangle(0,0,this.cameras.main.width,
