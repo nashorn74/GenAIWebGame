@@ -51,3 +51,11 @@ def session(app):
     """DB 세션 직접 사용이 필요한 모델 테스트용."""
     with app.app_context():
         yield db.session
+
+
+# TODO: Socket.IO 이벤트 테스트 추가 필요
+# - move, join_map, monster_hit, player_hit 등 핵심 전투/이동 이벤트
+# - 몬스터 AI 루프 (_monster_loop) 어그로/추적/공격 검증
+# - 동시 타격 레이스 컨디션
+# flask-socketio의 test_client()를 사용하면 소켓 이벤트 테스트 가능:
+#   socketio_test_client = socketio.test_client(app, flask_test_client=client)

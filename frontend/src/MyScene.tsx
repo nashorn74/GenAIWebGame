@@ -24,7 +24,18 @@ const HITSTOP_FATAL     = 120
 const HITSTOP_HIT       = 80
 const KNOCKBACK_PX      = 16
 const PLAYER_KNOCKBACK_PX = 14
-const PLAYER_DMG_COLOR  = '#ff6666'
+const PLAYER_FLASH_COLOR  = 0xff0000
+const PLAYER_FLASH_ALPHA  = 0.6
+const PLAYER_FLASH_DUR    = 180
+const PLAYER_SHAKE_DUR    = 80
+const PLAYER_SHAKE_INT    = 0.008
+const PLAYER_KB_DUR       = 100
+const PLAYER_DMG_COLOR    = '#ff6666'
+const PLAYER_DMG_FONT     = '30px'
+const PLAYER_DMG_STROKE   = 4
+const PLAYER_DMG_YOFF     = 80
+const PLAYER_DMG_FLOAT    = 45
+const PLAYER_DMG_FLOAT_DUR = 700
 
 export class MyScene extends Phaser.Scene {
   /* ▽▽ 필드 ▽▽ */
@@ -308,33 +319,41 @@ export class MyScene extends Phaser.Scene {
 
       // ① 섬광 오버레이
       const flash = this.add.rectangle(0,0,this.cameras.main.width,
-                  this.cameras.main.height,0xff0000,0.6)
+                  this.cameras.main.height,PLAYER_FLASH_COLOR,PLAYER_FLASH_ALPHA)
                   .setOrigin(0).setScrollFactor(0).setDepth(99);
-      this.tweens.add({targets:flash,alpha:0,duration:180,
+      this.tweens.add({targets:flash,alpha:0,duration:PLAYER_FLASH_DUR,
                       onComplete:()=>flash.destroy()});
 
       // ② 카메라 흔들림
-      this.cameras.main.shake(80, 0.008);
+      this.cameras.main.shake(PLAYER_SHAKE_DUR, PLAYER_SHAKE_INT);
 
       // ③ 캐릭터 뒤로 점프-백
       const vel = this.player.body?.velocity;
+      let dir: Phaser.Math.Vector2;
       if (vel && (vel.x || vel.y)) {
-        const dir = new Phaser.Math.Vector2(vel).normalize().scale(-PLAYER_KNOCKBACK_PX);
+        dir = new Phaser.Math.Vector2(vel).normalize().scale(-PLAYER_KNOCKBACK_PX);
+      } else if (this.player.body) {
+        // 정지 상태 피격 — 랜덤 방향으로 넉백
+        const angle = Math.random() * Math.PI * 2;
+        dir = new Phaser.Math.Vector2(Math.cos(angle), Math.sin(angle)).scale(PLAYER_KNOCKBACK_PX);
+      } else {
+        console.warn('player_hit: player.body is null, skipping knockback');
+        dir = Phaser.Math.Vector2.ZERO;
+      }
+      if (dir.x || dir.y) {
         this.tweens.add({targets:this.player,
           x: this.player.x + dir.x, y: this.player.y + dir.y,
-          yoyo:true,duration:100,ease:'Quad.easeOut'});
-      } else if (!this.player.body) {
-        console.warn('player_hit: player.body is null, skipping knockback');
+          yoyo:true,duration:PLAYER_KB_DUR,ease:'Quad.easeOut'});
       }
 
       // ④ 데미지 텍스트 (플레이어 머리 위)
       const pDmgText = this.add.text(
-        this.player.x, this.player.y - 80,
-        `-${p.dmg}`, {fontSize:'30px', color:PLAYER_DMG_COLOR,
-        stroke:'#000', strokeThickness:4}
+        this.player.x, this.player.y - PLAYER_DMG_YOFF,
+        `-${p.dmg}`, {fontSize:PLAYER_DMG_FONT, color:PLAYER_DMG_COLOR,
+        stroke:'#000', strokeThickness:PLAYER_DMG_STROKE}
       ).setOrigin(0.5).setDepth(10);
-      this.tweens.add({targets:pDmgText, y:pDmgText.y-45, alpha:0,
-        duration:700, ease:'Cubic.easeOut', onComplete:()=>pDmgText.destroy()});
+      this.tweens.add({targets:pDmgText, y:pDmgText.y-PLAYER_DMG_FLOAT, alpha:0,
+        duration:PLAYER_DMG_FLOAT_DUR, ease:'Cubic.easeOut', onComplete:()=>pDmgText.destroy()});
     });
 
     this.socket.on('player_respawn', (r:{

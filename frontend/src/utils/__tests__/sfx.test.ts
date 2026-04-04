@@ -21,7 +21,7 @@ const AudioContextMock = vi.fn(() => ({
   currentTime: 0,
   state: 'running',
   destination: {},
-  resume: vi.fn(),
+  resume: vi.fn().mockResolvedValue(undefined),
   createOscillator: vi.fn(() => ({ ...mockOscillator })),
   createGain: vi.fn(() => ({ ...mockGainNode })),
 }))
@@ -36,36 +36,51 @@ beforeEach(() => {
 describe('sfx', () => {
   it('playHitSfx creates oscillator and schedules stop', async () => {
     const { playHitSfx } = await import('../sfx')
-    playHitSfx()
+    await playHitSfx()
     expect(mockStart).toHaveBeenCalled()
     expect(mockStop).toHaveBeenCalled()
   })
 
   it('playPlayerHitSfx creates oscillator and schedules stop', async () => {
     const { playPlayerHitSfx } = await import('../sfx')
-    playPlayerHitSfx()
+    await playPlayerHitSfx()
     expect(mockStart).toHaveBeenCalled()
     expect(mockStop).toHaveBeenCalled()
   })
 
   it('playKillSfx creates two oscillators (dual layer)', async () => {
     const { playKillSfx } = await import('../sfx')
-    playKillSfx()
+    await playKillSfx()
     expect(mockStart).toHaveBeenCalledTimes(2)
     expect(mockStop).toHaveBeenCalledTimes(2)
   })
 
   it('getCtx reuses AudioContext singleton across calls', async () => {
     const { playHitSfx } = await import('../sfx')
-    playHitSfx()
-    playHitSfx()
+    await playHitSfx()
+    await playHitSfx()
     expect(AudioContextMock).toHaveBeenCalledTimes(1)
   })
 
   it('gracefully handles AudioContext creation failure', async () => {
     AudioContextMock.mockImplementationOnce(() => { throw new Error('not allowed') })
     const { playHitSfx } = await import('../sfx')
-    expect(() => playHitSfx()).not.toThrow()
+    await expect(playHitSfx()).resolves.toBeUndefined()
     expect(mockStart).not.toHaveBeenCalled()
+  })
+
+  it('calls resume() when AudioContext is suspended', async () => {
+    const resumeMock = vi.fn().mockResolvedValue(undefined)
+    AudioContextMock.mockImplementationOnce(() => ({
+      currentTime: 0,
+      state: 'suspended',
+      destination: {},
+      resume: resumeMock,
+      createOscillator: vi.fn(() => ({ ...mockOscillator })),
+      createGain: vi.fn(() => ({ ...mockGainNode })),
+    }))
+    const { playHitSfx } = await import('../sfx')
+    await playHitSfx()
+    expect(resumeMock).toHaveBeenCalled()
   })
 })

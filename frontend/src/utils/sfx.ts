@@ -20,7 +20,7 @@ const SFX_CONFIG = {
 
 let ctx: AudioContext | null = null;
 
-function getCtx(): AudioContext | null {
+async function getCtx(): Promise<AudioContext | null> {
   if (!ctx) {
     try {
       ctx = new AudioContext();
@@ -29,7 +29,7 @@ function getCtx(): AudioContext | null {
     }
   }
   if (ctx.state === 'suspended') {
-    ctx.resume();
+    await ctx.resume();
   }
   return ctx;
 }
@@ -51,22 +51,22 @@ function playTone(ac: AudioContext, cfg: ToneConfig) {
 }
 
 /** 플레이어가 몬스터를 타격할 때 */
-export function playHitSfx() {
-  const ac = getCtx();
+export async function playHitSfx() {
+  const ac = await getCtx();
   if (!ac) return;
   playTone(ac, SFX_CONFIG.hit);
 }
 
 /** 몬스터가 플레이어를 타격할 때 */
-export function playPlayerHitSfx() {
-  const ac = getCtx();
+export async function playPlayerHitSfx() {
+  const ac = await getCtx();
   if (!ac) return;
   playTone(ac, SFX_CONFIG.playerHit);
 }
 
 /** 몬스터 사망 시 */
-export function playKillSfx() {
-  const ac = getCtx();
+export async function playKillSfx() {
+  const ac = await getCtx();
   if (!ac) return;
   playTone(ac, SFX_CONFIG.killBass);
   playTone(ac, SFX_CONFIG.killClick);
