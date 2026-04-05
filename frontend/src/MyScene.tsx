@@ -73,6 +73,8 @@ export class MyScene extends Phaser.Scene {
   private monsterSyncTimer?: Phaser.Time.TimerEvent;  // 주기적 몬스터 동기화
 
   upsertMonster = (m:any)=>{
+    // 현재 맵과 다른 맵의 몬스터는 무시
+    if(m.map_key && m.map_key !== this.currentMap) return;
     if(!this.mapReady){          // 아직 맵 세팅 중이면
       this.monsterQueue.push(m); //  → 큐에 적재
       return;
@@ -226,8 +228,10 @@ export class MyScene extends Phaser.Scene {
     });
 
     this.socket.on('current_monsters', (arr: any[]) => {
+      // 현재 맵 몬스터만 필터링 (맵 전환 레이스 컨디션 방지)
+      const filtered = arr.filter((m: any) => !m.map_key || m.map_key === this.currentMap);
       // ── 양방향 동기화: 서버에 없는 몬스터 제거 ──
-      const serverIds = new Set(arr.map((m: any) => m.id));
+      const serverIds = new Set(filtered.map((m: any) => m.id));
       for (const [id, cont] of this.monsters) {
         if (!serverIds.has(id)) {
           this.tweens.killTweensOf(cont);
@@ -239,7 +243,7 @@ export class MyScene extends Phaser.Scene {
         }
       }
       // ── 서버 몬스터 upsert ──
-      arr.forEach(this.upsertMonster);
+      filtered.forEach(this.upsertMonster);
     });
     this.socket.on('monster_spawn',    this.upsertMonster); // ← 수정!
     this.socket.on('monster_move', p => {
