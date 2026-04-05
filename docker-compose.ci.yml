@@ -1,0 +1,50 @@
+# CI 스모크 테스트용 — 로컬 빌드 이미지를 사용
+version: "3.8"
+
+services:
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: my_database
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d my_database"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: arkacia-backend:ci
+    environment:
+      - DATABASE_URI=postgresql://myuser:mypass@db:5432/my_database
+      - REDIS_URL=redis://redis:6379/0
+      - EVENTLET_NO_GREENDNS=yes
+      - SECRET_KEY=ci-test-secret-key
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/maps')"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  frontend:
+    image: arkacia-frontend:ci
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy

@@ -1,4 +1,4 @@
-name: Build & Push to GHCR
+name: Build, Test & Push to GHCR
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
   packages: write
 
 jobs:
-  # ── 테스트 (test.yml 재사용) ──
+  # ── 단위 테스트 (test.yml 재사용) ──
   tests:
     uses: ./.github/workflows/test.yml
     permissions:
@@ -21,15 +21,38 @@ jobs:
       checks: write
       pull-requests: write
 
-  # ── Docker 빌드 & GHCR 푸시 ──
-  build-and-push:
-    name: Build & Push Docker Images
+  # ── Docker 빌드 → 스모크 테스트 → GHCR 푸시 ──
+  build-test-push:
+    name: Build, Smoke Test & Push
     runs-on: ubuntu-latest
     needs: [tests]
 
     steps:
       - uses: actions/checkout@v4
 
+      # ── 1) 이미지 빌드 (push 없이 로컬에만) ──
+      - name: Build backend image
+        run: docker build -t arkacia-backend:ci ./backend
+
+      - name: Build frontend image
+        run: docker build -t arkacia-frontend:ci ./frontend
+
+      # ── 2) 컨테이너 실행 & 스모크 테스트 ──
+      - name: Start containers
+        run: docker compose -f docker-compose.ci.yml up -d --wait --wait-timeout 60
+
+      - name: Run smoke tests
+        run: bash scripts/smoke-test.sh
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.ci.yml logs
+
+      - name: Stop containers
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v
+
+      # ── 3) 스모크 테스트 통과 → GHCR 푸시 ──
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -37,45 +60,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Tag & push backend
+        run: |
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          docker tag arkacia-backend:ci ${{ env.IMAGE_PREFIX }}-backend:latest
+          docker tag arkacia-backend:ci ${{ env.IMAGE_PREFIX }}-backend:$SHA
+          docker push ${{ env.IMAGE_PREFIX }}-backend:latest
+          docker push ${{ env.IMAGE_PREFIX }}-backend:$SHA
 
-      # ── Backend ──
-      - name: Backend image metadata
-        id: meta-backend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_PREFIX }}-backend
-          tags: |
-            type=raw,value=latest
-            type=sha,prefix=
-
-      - name: Build & push backend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
-          labels: ${{ steps.meta-backend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # ── Frontend ──
-      - name: Frontend image metadata
-        id: meta-frontend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_PREFIX }}-frontend
-          tags: |
-            type=raw,value=latest
-            type=sha,prefix=
-
-      - name: Build & push frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Tag & push frontend
+        run: |
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          docker tag arkacia-frontend:ci ${{ env.IMAGE_PREFIX }}-frontend:latest
+          docker tag arkacia-frontend:ci ${{ env.IMAGE_PREFIX }}-frontend:$SHA
+          docker push ${{ env.IMAGE_PREFIX }}-frontend:latest
+          docker push ${{ env.IMAGE_PREFIX }}-frontend:$SHA
