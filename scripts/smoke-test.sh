@@ -19,6 +19,19 @@ check() {
   fi
 }
 
+check_post() {
+  local desc="$1" url="$2" expect="$3"
+  local status
+  status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$url" || echo "000")
+  if [ "$status" = "$expect" ]; then
+    echo "  ✅ $desc — HTTP $status"
+    PASS=$((PASS + 1))
+  else
+    echo "  ❌ $desc — HTTP $status (expected $expect)"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
 check_body() {
   local desc="$1" url="$2" needle="$3"
   local body
@@ -48,7 +61,7 @@ check_body "GET /           → Flask"   "$BASE/api/maps"    "map_key"
 
 echo ""
 echo "── Auth (via nginx proxy) ──"
-check "POST /auth/login → 400 (no body)" "$BASE/auth/login" "400"
+check_post "POST /auth/login → 400 (no body)" "$BASE/auth/login" "400"
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
