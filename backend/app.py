@@ -876,10 +876,10 @@ if __name__ == '__main__':
             db.session.add_all(seed_monsters) 
             db.session.commit()
 
-    # dev 환경이므로 allow_unsafe_werkzeug 옵션 활성
+    debug = os.environ.get("FLASK_DEBUG", "false").lower() in ("1", "true")
     socketio.run(app,
                  host='0.0.0.0',
                  port=5000,
-                 debug=True,
-                 #allow_unsafe_werkzeug=True
+                 debug=debug,
+                 allow_unsafe_werkzeug=debug,
                  )

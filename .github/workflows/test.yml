@@ -5,6 +5,7 @@ on:
     branches: ['**']
   pull_request:
     branches: [main]
+  workflow_call:      # deploy.yml 등에서 재사용 가능
 
 jobs:
   backend:
