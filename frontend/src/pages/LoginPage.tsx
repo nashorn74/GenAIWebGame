@@ -40,7 +40,8 @@ export default function LoginPage() {
     return cleanup
   }, [tryPlayBgm])
 
-  const doLogin = async () => {
+  const doLogin = async (e?: React.FormEvent) => {
+    e?.preventDefault()
     setErr('')
     try {
       const res = await fetch(`${BASE_URL}/auth/login`, {
@@ -117,34 +118,38 @@ export default function LoginPage() {
         }}
       >
         <Typography variant="h5" gutterBottom>Login</Typography>
-        <TextField
-          label="Username" fullWidth margin="normal"
-          value={username} onChange={e=>setUsername(e.target.value)}
-        />
-        <TextField
-          label="Password" type="password" fullWidth margin="normal"
-          value={password} onChange={e=>setPassword(e.target.value)}
-        />
-        {err && <Typography color="error">{err}</Typography>}
+        <form onSubmit={doLogin}>
+          <TextField
+            label="Username" fullWidth margin="normal"
+            autoComplete="username"
+            value={username} onChange={e=>setUsername(e.target.value)}
+          />
+          <TextField
+            label="Password" type="password" fullWidth margin="normal"
+            autoComplete="current-password"
+            value={password} onChange={e=>setPassword(e.target.value)}
+          />
+          {err && <Typography color="error">{err}</Typography>}
 
-        <Button variant="contained" fullWidth sx={{mt:1}} onClick={doLogin}>
-          Login
-        </Button>
+          <Button variant="contained" fullWidth sx={{mt:1}} type="submit">
+            Login
+          </Button>
+        </form>
         <Button fullWidth sx={{mt:1}} onClick={()=>setOpen(true)}>
-          Sign Up
+          Sign Up
         </Button>
       </Paper>
 
       {/* ---------- 회원 가입 다이얼로그 ---------- */}
       <Dialog open={openSignUp} onClose={()=>setOpen(false)}>
-        <DialogTitle>Sign Up</DialogTitle>
+        <DialogTitle>Sign Up</DialogTitle>
         <DialogContent>
           <TextField
-            label="Username (4‑12 a‑z0‑9)" fullWidth margin="dense"
+            label="Username (4-12 a-z0-9)" fullWidth margin="dense"
             value={reg.id} onChange={e=>setReg({...reg,id:e.target.value})}
           />
           <TextField
-            label="Password (8‑16)" type="password" fullWidth margin="dense"
+            label="Password (8-16)" type="password" fullWidth margin="dense"
             value={reg.pw} onChange={e=>setReg({...reg,pw:e.target.value})}
           />
           <TextField
@@ -159,7 +164,7 @@ export default function LoginPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={()=>setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={doRegister}>Sign Up</Button>
+          <Button variant="contained" onClick={doRegister}>Sign Up</Button>
         </DialogActions>
       </Dialog>
     </Box>
