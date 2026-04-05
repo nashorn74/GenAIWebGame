@@ -1,5 +1,5 @@
 // src/pages/LoginPage.tsx
-import React, { useState } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box, Paper, TextField, Button, Typography, Dialog, DialogTitle,
@@ -15,7 +15,25 @@ export default function LoginPage() {
   const [err, setErr]         = useState('')
   const [openSignUp, setOpen] = useState(false)
 
-  const doLogin = async () => {
+  /* ─── 배경 음악 ───
+   * 핵심: useEffect에서 play()를 호출하지 않는다.
+   *   - 브라우저가 pending play request를 만들면 첫 번째 사용자 제스처를 소비함
+   *   - document 레벨 리스너도 React 이벤트와 경합할 수 있음
+   * 대신: 컨테이너 Box의 onClick으로 오디오 재생 시도.
+   *   - setTimeout(0)으로 지연하여 로그인 등 주요 핸들러가 먼저 완료되도록 함
+   */
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const ensureBgm = useCallback(() => {
+    setTimeout(() => {
+      const el = audioRef.current
+      if (!el || !el.paused) return
+      el.play().catch(() => {})
+    }, 0)
+  }, [])
+
+  const doLogin = async (e?: React.FormEvent) => {
+    e?.preventDefault()
     setErr('')
     try {
       const res = await fetch(`${BASE_URL}/auth/login`, {
@@ -61,6 +79,8 @@ export default function LoginPage() {
   /* ------------------- 렌더링 ------------------- */
   return (
     <Box
+      onClick={ensureBgm}
+      onKeyDown={ensureBgm}
       sx={{
         width: '100vw',
         height: '100vh',
@@ -70,8 +90,8 @@ export default function LoginPage() {
         position: 'relative',
       }}
     >
-      {/* 배경 음악 */}
-      <audio src="/assets/veins_of_arkacia.mp3" autoPlay loop />
+      {/* 배경 음악 — preload="none"으로 네트워크 경합 방지 */}
+      <audio ref={audioRef} src="/assets/veins_of_arkacia.mp3" loop preload="none" />
 
       {/* 게임 타이틀 */}
       <Typography
@@ -92,34 +112,38 @@ export default function LoginPage() {
         }}
       >
         <Typography variant="h5" gutterBottom>Login</Typography>
-        <TextField
-          label="Username" fullWidth margin="normal"
-          value={username} onChange={e=>setUsername(e.target.value)}
-        />
-        <TextField
-          label="Password" type="password" fullWidth margin="normal"
-          value={password} onChange={e=>setPassword(e.target.value)}
-        />
-        {err && <Typography color="error">{err}</Typography>}
+        <form onSubmit={doLogin}>
+          <TextField
+            label="Username" fullWidth margin="normal"
+            autoComplete="username"
+            value={username} onChange={e=>setUsername(e.target.value)}
+          />
+          <TextField
+            label="Password" type="password" fullWidth margin="normal"
+            autoComplete="current-password"
+            value={password} onChange={e=>setPassword(e.target.value)}
+          />
+          {err && <Typography color="error">{err}</Typography>}
 
-        <Button variant="contained" fullWidth sx={{mt:1}} onClick={doLogin}>
-          Login
-        </Button>
+          <Button variant="contained" fullWidth sx={{mt:1}} type="submit">
+            Login
+          </Button>
+        </form>
         <Button fullWidth sx={{mt:1}} onClick={()=>setOpen(true)}>
-          Sign Up
+          Sign Up
         </Button>
       </Paper>
 
       {/* ---------- 회원 가입 다이얼로그 ---------- */}
       <Dialog open={openSignUp} onClose={()=>setOpen(false)}>
-        <DialogTitle>Sign Up</DialogTitle>
+        <DialogTitle>Sign Up</DialogTitle>
         <DialogContent>
           <TextField
-            label="Username (4‑12 a‑z0‑9)" fullWidth margin="dense"
+            label="Username (4-12 a-z0-9)" fullWidth margin="dense"
             value={reg.id} onChange={e=>setReg({...reg,id:e.target.value})}
           />
           <TextField
-            label="Password (8‑16)" type="password" fullWidth margin="dense"
+            label="Password (8-16)" type="password" fullWidth margin="dense"
             value={reg.pw} onChange={e=>setReg({...reg,pw:e.target.value})}
           />
           <TextField
@@ -134,7 +158,7 @@ export default function LoginPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={()=>setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={doRegister}>Sign Up</Button>
+          <Button variant="contained" onClick={doRegister}>Sign Up</Button>
         </DialogActions>
       </Dialog>
     </Box>

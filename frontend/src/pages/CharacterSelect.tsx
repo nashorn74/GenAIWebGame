@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Box, Card, CardActionArea, CardContent, Typography,
+  Box, Card, CardActionArea, CardActions, CardContent, Typography,
   Button, Grid, Dialog, CardMedia
 } from '@mui/material'
 import { getUserId } from '../App'
@@ -41,11 +41,11 @@ export default function CharacterSelect() {
   /** 슬롯 카드 UI */
   const renderSlot = (index:number) => {
     const char = chars[index]
-  
+
     /* ───────────── 1) 비어있는 슬롯 ───────────── */
     if(!char){
       return (
-        <Card sx={{height:260}}>
+        <Card sx={{height:300}}>
           <CardActionArea onClick={()=>{ setEdit(null); setOpen(true) }}
                           sx={{height:'100%', display:'flex',
                               alignItems:'center', justifyContent:'center'}}>
@@ -54,19 +54,18 @@ export default function CharacterSelect() {
         </Card>
       )
     }
-  
+
     /* ───────────── 2) 캐릭터가 있는 슬롯 ───────────── */
     const img = IMAGE_BY_JOB[char.job] || '/assets/char001.jpg'
-  
+
     return (
       <Card
         sx={{
-          height:260,
+          height:300,
           border: sel?.id===char.id ? '2px solid #1976d2' : undefined
         }}
       >
-        <CardActionArea onClick={()=>setSel(char)} sx={{height:'100%'}}>
-          {/* <CardMedia> : 300 x 140px 정도 영역에 이미지 삽입 */}
+        <CardActionArea onClick={()=>setSel(char)}>
           <CardMedia
             component="img"
             height="140"
@@ -78,19 +77,17 @@ export default function CharacterSelect() {
             <Typography variant="body2" color="text.secondary">
               Lv.{char.level} {char.job}
             </Typography>
-  
-            {/* 편집 / 삭제 작은 버튼 */}
-            <Box sx={{mt:1}}>
-              <Button size="small" onClick={(e)=>{e.stopPropagation(); setEdit(char); setOpen(true)}}>Edit</Button>
-              <Button size="small" color="error"
-                onClick={async (e)=>{e.stopPropagation();
-                  if(!confirm('Delete this character?')) return
-                  await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/characters/${char.id}`,{method:'DELETE'})
-                  reload()
-                }}>Delete</Button>
-            </Box>
           </CardContent>
         </CardActionArea>
+        <CardActions>
+          <Button size="small" onClick={()=>{ setEdit(char); setOpen(true) }}>Edit</Button>
+          <Button size="small" color="error"
+            onClick={async ()=>{
+              if(!confirm('Delete this character?')) return
+              await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/characters/${char.id}`,{method:'DELETE'})
+              reload()
+            }}>Delete</Button>
+        </CardActions>
       </Card>
     )
   }
