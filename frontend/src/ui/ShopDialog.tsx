@@ -59,6 +59,9 @@ export default function ShopDialog ({
     ? items
     : inv.filter(ci => ci.item.sell_price > 0)    // 판매 가능 항목
 
+  console.log(`[shop] tab=${tab}, items=${items.length}, inv=${inv.length}, list=${list.length}`,
+    list.map((i: any) => `${i.name ?? i.item?.name}(id=${i.id ?? i.item_id})`));
+
   /* 선택된 아이템 DTO */
   const selItem = tab === 'buy'
     ? items.find(i => i.id === selId)

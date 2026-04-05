@@ -149,6 +149,9 @@ class CharacterItem(db.Model):
     캐릭터가 소지 중인 아이템(인벤토리).
     """
     __tablename__ = 'character_items'
+    __table_args__ = (
+        db.UniqueConstraint('character_id', 'item_id', name='uq_char_item'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     character_id = db.Column(db.Integer, db.ForeignKey('characters.id'), nullable=False)

@@ -22,7 +22,23 @@ export interface ItemDTO {
   export async function fetchInventory(charId: number): Promise<CharItemDTO[]> {
     const r = await fetch(`${BASE}/api/characters/${charId}`, { cache: 'no-store' });
     const c = await r.json();
-    return c.items as CharItemDTO[];
+    const raw = c.items as CharItemDTO[];
+
+    // DB 레이스 컨디션으로 동일 item_id에 여러 행이 존재할 수 있음 → 통합
+    const merged = new Map<number, CharItemDTO>();
+    for (const ci of raw) {
+      const existing = merged.get(ci.item_id);
+      if (existing) {
+        existing.quantity += ci.quantity;
+        console.warn(`[inv] 중복 item_id=${ci.item_id} 통합: qty=${existing.quantity}`);
+      } else {
+        merged.set(ci.item_id, { ...ci });
+      }
+    }
+    const result = [...merged.values()];
+    console.log('[inv] fetchInventory:', result.map(i =>
+      `${i.item.name} x${i.quantity}`).join(', '));
+    return result;
   }
   
   /* ───── 상점 거래 ───── */
