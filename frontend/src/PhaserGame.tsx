@@ -46,6 +46,7 @@ export default function PhaserGame() {
   const [talkNpc, setTalkNpc] = useState<NpcDTO|null>(null)
   const [shopNpc , setShopNpc ] = useState<NpcDTO|null>(null)
   const [invOpen , setInvOpen ] = useState(false)
+  const [transitioning, setTransitioning] = useState(false)
 
   const [chatMessages, setChatMessages] = useState<{sender:string, text:string, ts:number}[]>([])
   const [chatInput, setChatInput]     = useState("")
@@ -148,19 +149,22 @@ export default function PhaserGame() {
       // immer 등이 없다면 간단히 shallow merge
       setChar(prev => prev ? { ...prev, ...patch } : prev);
     };
+    const onTransition = (active: boolean) => setTransitioning(active)
 
     scene.events.on('mapKey',   onMapKey)
     scene.events.on('coords',   onCoords)
     scene.events.on('bgmState', onBgm)
     scene.events.on('openNpcDialog', onNpc)
-    scene.events.on('charUpdate', onCharUpd);
+    scene.events.on('charUpdate', onCharUpd)
+    scene.events.on('mapTransition', onTransition)
 
     return () => {
       scene.events.off('mapKey',   onMapKey)
       scene.events.off('coords',   onCoords)
       scene.events.off('bgmState', onBgm)
       scene.events.off('openNpcDialog', onNpc)
-      scene.events.off('charUpdate', onCharUpd);
+      scene.events.off('charUpdate', onCharUpd)
+      scene.events.off('mapTransition', onTransition)
     }
   }, [gameRef.current])
 
@@ -194,6 +198,38 @@ export default function PhaserGame() {
           overflow : 'hidden',
         }}
       >
+        {/* ─── 맵 전환 오버레이 ─── */}
+        {transitioning && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(0,0,0,0.75)',
+              zIndex: 50,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              gap: 16,
+            }}
+          >
+            <div
+              style={{
+                width: 36, height: 36,
+                border: '3px solid rgba(255,255,255,0.3)',
+                borderTop: '3px solid #fff',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite',
+              }}
+            />
+            <span style={{ fontSize: 18, letterSpacing: 2 }}>
+              맵 이동 중…
+            </span>
+            <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+          </div>
+        )}
+
         {/* ─── 상단 HUD ─── */}
         <header
           style={{
@@ -333,6 +369,7 @@ export default function PhaserGame() {
           open={invOpen}
           charId={char?.id!}
           onClose={()=>setInvOpen(false)}
+          onAfterUse={refreshChar}
         />
       </div>
     </ThemeProvider>

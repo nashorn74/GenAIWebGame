@@ -120,6 +120,13 @@ def create_app():
 
     CORS(app)
 
+    @app.after_request
+    def add_cache_headers(response):
+        """API GET 응답에 Cache-Control 헤더를 추가하여 브라우저 캐시 방지"""
+        if request.method == 'GET' and request.path.startswith('/api/'):
+            response.headers['Cache-Control'] = 'no-store'
+        return response
+
     @app.teardown_appcontext
     def remove_session(exc=None):
         if exc:
@@ -194,13 +201,19 @@ def create_app():
                         .filter(Monster.died_at.isnot(None))          # safety
                         .all()
                     )
+                    respawned = False
                     for m in dead_ready:
                         if now - m.died_at >= m.respawn_s:
                             m.is_alive = True
                             m.hp       = m.max_hp
                             m.x, m.y   = m.spawn_x, m.spawn_y
                             m.died_at  = None
+                            respawned = True
                             socketio.emit('monster_spawn', m.to_dict(), room='map_dungeon1')
+
+                    # 리스폰 변경분을 즉시 커밋 — 이후 이동/전투 롤백에 영향받지 않도록
+                    if respawned:
+                        db.session.commit()
 
                     # ── 1) 살아있는 몬스터 랜덤 이동 (기존 로직) ──
 
@@ -423,6 +436,15 @@ def create_app():
             room=f'map_{cur_map}', include_self=False, namespace='/'
         )
 
+    # ── 몬스터 동기화 요청 (주기적 폴링 대응)
+    @socketio.on('request_monsters')
+    def handle_request_monsters(data):
+        map_key = data.get('map_key')
+        if not map_key:
+            return
+        monsters = Monster.query.filter_by(map_key=map_key, is_alive=True).all()
+        emit('current_monsters', [m.to_dict() for m in monsters])
+
     # ② 이동
     @socketio.on('move')
     def handle_move(data):
@@ -534,28 +556,30 @@ def create_app():
             # 클라이언트에 알림
             socketio.emit('exp_gain', {
                 "char_id": char.id, "exp": gained,
-                "total_exp": char.exp, "level": char.level, "level_up"  : level_up
+                "total_exp": char.exp, "level": char.level, "level_up": level_up,
+                "hp": char.hp, "max_hp": char.max_hp,
+                "mp": char.mp, "max_mp": char.max_mp,
             }, room=f"map_{new_map}")
             
             if mob.drop_item_id:                           # NULL 가드
-                # ▶︎ 아이템 획득 조회 시 autoflush OFF
-                with db.session.no_autoflush:
-                    ci = (CharacterItem.query
-                        .filter_by(character_id=char.id,
-                                    item_id=mob.drop_item_id)
-                        .first())
-                if ci:
-                    ci.quantity += 1
-                else:
-                    db.session.add(CharacterItem(character_id=char.id,
-                                                item_id=mob.drop_item_id,
-                                                quantity=1))
+                # race-safe upsert: INSERT ON CONFLICT UPDATE
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                stmt = pg_insert(CharacterItem).values(
+                    character_id=char.id,
+                    item_id=mob.drop_item_id,
+                    quantity=1,
+                ).on_conflict_do_update(
+                    constraint='uq_char_item',
+                    set_={'quantity': CharacterItem.quantity + 1},
+                )
+                db.session.execute(stmt)
 
             db.session.commit()                                # === 트랜잭션 끝 ===
 
         # ── 5. 결과 브로드캐스트 ─────────────────────────────────
         socketio.emit('monster_hit',
                     {'id' : mob.id,
+                    'attacker_id': char_id,
                     'dmg': dmg,
                     'hp' : mob.hp,
                     'x'  : mob.x,
@@ -628,6 +652,47 @@ if __name__ == '__main__':
         # ❗ 중요: 기존 테이블 DROP 후 CREATE (개발 환경에서만)
         #db.drop_all()
         db.create_all()
+
+        # ── 기존 중복 CharacterItem 레코드 통합 (1회성 마이그레이션) ──
+        from sqlalchemy import func
+        dupes = (
+            db.session.query(
+                CharacterItem.character_id,
+                CharacterItem.item_id,
+                func.count(CharacterItem.id).label('cnt'),
+                func.sum(CharacterItem.quantity).label('total_qty'),
+                func.min(CharacterItem.id).label('keep_id'),
+            )
+            .group_by(CharacterItem.character_id, CharacterItem.item_id)
+            .having(func.count(CharacterItem.id) > 1)
+            .all()
+        )
+        for d in dupes:
+            print(f'[migration] 중복 통합: char={d.character_id} item={d.item_id} '
+                  f'cnt={d.cnt} → qty={d.total_qty}')
+            # 보존할 행의 수량을 합산값으로 갱신
+            CharacterItem.query.filter_by(id=d.keep_id).update(
+                {'quantity': d.total_qty})
+            # 나머지 중복 행 삭제
+            CharacterItem.query.filter(
+                CharacterItem.character_id == d.character_id,
+                CharacterItem.item_id == d.item_id,
+                CharacterItem.id != d.keep_id,
+            ).delete()
+        if dupes:
+            db.session.commit()
+            print(f'[migration] {len(dupes)}건 중복 통합 완료')
+
+        # unique constraint 추가 시도 (이미 있으면 무시)
+        try:
+            db.session.execute(db.text(
+                'ALTER TABLE character_items '
+                'ADD CONSTRAINT uq_char_item UNIQUE (character_id, item_id)'
+            ))
+            db.session.commit()
+            print('[migration] uq_char_item 제약조건 추가 완료')
+        except Exception:
+            db.session.rollback()   # 이미 존재하면 무시
 
         # 예: Greenfield NPC들을 DB에 미리 추가 (개발용)
         # 1) NPC 시드

@@ -36,6 +36,7 @@ const PLAYER_DMG_STROKE   = 4
 const PLAYER_DMG_YOFF     = 80
 const PLAYER_DMG_FLOAT    = 45
 const PLAYER_DMG_FLOAT_DUR = 700
+const ATTACK_ANIM_DURATION = 400   // ms — 공격 애니메이션 유지 시간
 
 export class MyScene extends Phaser.Scene {
   /* ▽▽ 필드 ▽▽ */
@@ -67,8 +68,13 @@ export class MyScene extends Phaser.Scene {
   private monstersMeta: Record<number, { max_hp:number }> = {};
   private monsterQueue: any[] = [];   //  ← ① 추가
   private mapReady = false;           //  ← ② 추가
+  private isAttacking = false;        // 공격 애니메이션 재생 중 플래그
+  private attackTimer?: Phaser.Time.TimerEvent;  // 공격 타이머 (중복 방지)
+  private monsterSyncTimer?: Phaser.Time.TimerEvent;  // 주기적 몬스터 동기화
 
   upsertMonster = (m:any)=>{
+    // 현재 맵과 다른 맵의 몬스터는 무시
+    if(m.map_key && m.map_key !== this.currentMap) return;
     if(!this.mapReady){          // 아직 맵 세팅 중이면
       this.monsterQueue.push(m); //  → 큐에 적재
       return;
@@ -94,6 +100,8 @@ export class MyScene extends Phaser.Scene {
     this.load.image('char_stand2','char1_stand2.png')
     this.load.image('char_walk1' ,'char1_walk1.png')
     this.load.image('char_walk2' ,'char1_walk2.png')
+    this.load.image('char_attack1','char1_attack1.png')
+    this.load.image('char_attack2','char1_attack2.png')
 
     /* --- NPC 스프라이트(stand 2컷) --- */
     for (let i = 1; i <= 10; i++) {
@@ -180,9 +188,15 @@ export class MyScene extends Phaser.Scene {
       this.events.emit("chat_message", msg)
     })
 
-    /* 3. 연결 후에 join_map 보내는지 확인 */
+    /* 3. 연결(재연결 포함) 시 현재 맵 room 재가입 */
     this.socket.on('connect', () => {
       console.log('[socket] connected id=', this.socket.id)
+      if (this.currentMap) {
+        this.socket.emit('join_map', {
+          character_id: this.meId,
+          map_key: this.currentMap,
+        });
+      }
     })
     this.socket.on('disconnect',()=>console.log('[socket] disconnect'))
 
@@ -213,24 +227,36 @@ export class MyScene extends Phaser.Scene {
       this.removeActor(id);
     });
 
-    this.socket.on('current_monsters', arr =>
-      arr.forEach(this.upsertMonster)          // ← 수정!
-    );
+    this.socket.on('current_monsters', (arr: any[]) => {
+      // 현재 맵 몬스터만 필터링 (맵 전환 레이스 컨디션 방지)
+      const filtered = arr.filter((m: any) => !m.map_key || m.map_key === this.currentMap);
+      // ── 양방향 동기화: 서버에 없는 몬스터 제거 ──
+      const serverIds = new Set(filtered.map((m: any) => m.id));
+      for (const [id, cont] of this.monsters) {
+        if (!serverIds.has(id)) {
+          this.tweens.killTweensOf(cont);
+          cont.each((child: Phaser.GameObjects.GameObject) =>
+            this.tweens.killTweensOf(child));
+          cont.destroy(true);
+          this.monsters.delete(id);
+          delete this.monstersMeta[id];
+        }
+      }
+      // ── 서버 몬스터 upsert ──
+      filtered.forEach(this.upsertMonster);
+    });
     this.socket.on('monster_spawn',    this.upsertMonster); // ← 수정!
     this.socket.on('monster_move', p => {
+      if (!this.mapReady) return            // 맵 전환 중엔 무시
       const cont = this.monsters.get(p.id)
       if (!cont || !this.tilemap) return
-    
+
       const dstX = (p.x + 0.5) * this.tilemap.tileWidth
       const dstY = (p.y + 0.5) * this.tilemap.tileHeight
-    
+
       // 이미 그 위치라면 아무것도 안 함
       if (Math.abs(cont.x - dstX) < 1 && Math.abs(cont.y - dstY) < 1) return
 
-      if(!this.monsters.has(p.id)){
-        this.upsertMonster({...p, sprite1:'dummy.png', sprite2:'dummy.png', species:''});
-      }
-    
       // 8-프레임(≈0.13s) 동안 선형 이동 → “뚝” 사라지는 느낌 제거
       this.tweens.add({
         targets: cont,
@@ -241,17 +267,40 @@ export class MyScene extends Phaser.Scene {
       })
     })
     this.socket.on('monster_despawn', ({id}) => {
-      this.monsters.get(id)?.destroy(true)
-      this.monsters.delete(id)
+      const cont = this.monsters.get(id);
+      if (cont) {
+        // 활성 트윈 정리 후 파괴 — 리스폰 시 잔여 트윈 간섭 방지
+        this.tweens.killTweensOf(cont);
+        cont.each((child: Phaser.GameObjects.GameObject) =>
+          this.tweens.killTweensOf(child));
+        cont.destroy(true);
+      }
+      this.monsters.delete(id);
+      delete this.monstersMeta[id];
     })
 
     /* --- 소켓 이벤트 추가 --- */
     this.socket.on('monster_hit', (info)=>{
       const cont = this.monsters.get(info.id);
       if (!cont || !this.tilemap) return;
-    
-      /* ① 카메라 & 히트-스톱 + SFX */
+
+      /* ⓪ 공격 애니메이션 — 본인이 때린 경우만, 사망 시 즉시 중단 */
       const isFatal = info.hp <= 0;
+      if (info.attacker_id === this.meId && this.anims.exists('attack')) {
+        if (isFatal) {
+          // 킬 — 즉시 공격 종료
+          this.attackTimer?.remove(false);
+          this.isAttacking = false;
+        } else {
+          // 타격 — 공격 애니메이션 재생(타이머 갱신)
+          this.attackTimer?.remove(false);
+          this.isAttacking = true;
+          this.player.play('attack', true);
+          this.attackTimer = this.time.delayedCall(ATTACK_ANIM_DURATION, () => {
+            this.isAttacking = false;
+          });
+        }
+      }
       if (isFatal) { playKillSfx().catch(() => {}); } else { playHitSfx().catch(() => {}); }
 
       this.cameras.main.shake(
@@ -380,17 +429,23 @@ export class MyScene extends Phaser.Scene {
     });
 
     this.socket.on('exp_gain', (e:{
-      char_id:number, exp:number, total_exp:number, level:number, level_up?:boolean
+      char_id:number, exp:number, total_exp:number, level:number, level_up?:boolean,
+      hp?:number, max_hp?:number, mp?:number, max_mp?:number
     })=>{
       if (e.char_id !== this.meId) return;
 
-      console.log(`[EXP] +${e.exp} → Lv.${e.level}`);
+      console.log(`[EXP] +${e.exp} → Lv.${e.level}`, e.level_up ? `HP=${e.hp}/${e.max_hp}` : '');
 
-      /* 👉 EXP / 레벨 패치 */
-      this.events.emit('charUpdate', {
+      /* 👉 EXP / 레벨 / HP·MP 패치 */
+      const patch: Record<string, unknown> = {
         exp   : e.total_exp,
-        level : e.level
-      });
+        level : e.level,
+      };
+      if (e.hp     != null) patch.hp     = e.hp;
+      if (e.max_hp != null) patch.max_hp = e.max_hp;
+      if (e.mp     != null) patch.mp     = e.mp;
+      if (e.max_mp != null) patch.max_mp = e.max_mp;
+      this.events.emit('charUpdate', patch);
 
       /* ───── 눈에 띄는 레벨-업 연출 ───── */
       if (e.level_up){
@@ -446,6 +501,12 @@ export class MyScene extends Phaser.Scene {
       key: 'walk',
       frames: [{ key: 'char_walk1' }, { key: 'char_walk2' }],
       frameRate: 4,
+      repeat: -1,
+    })
+    this.anims.create({
+      key: 'attack',
+      frames: [{ key: 'char_attack1' }, { key: 'char_attack2' }],
+      frameRate: 6,
       repeat: -1,
     })
 
@@ -549,10 +610,14 @@ export class MyScene extends Phaser.Scene {
     /* 이미 전환 중이면 무시 */
     if (this.isChangingMap) return
     this.isChangingMap = true               // ★ 전환 잠금
+    this.events.emit('mapTransition', true) // React 오버레이 표시
+    this.player.setVisible(false)           // 이전 좌표에서 깜박임 방지
 
     this.mapReady = false;
 
     /* ─ 이전 리소스 정리 ─ */
+    this.monsterSyncTimer?.remove(false);
+    this.monsterSyncTimer = undefined;
     this.playerCollider?.destroy()
     this.layer?.destroy()
     if (this.npcGroup) {
@@ -599,6 +664,7 @@ export class MyScene extends Phaser.Scene {
       (tileX + 0.5) * map.tileWidth,
       (tileY + 0.5) * map.tileHeight
     )
+    this.player.setVisible(true)            // 새 좌표에 도착 → 다시 표시
     this.events.emit('mapKey', mapMeta.display_name)
 
     /* 내 컨테이너는 파괴 후 재생성 → 고스트 방지 */
@@ -632,6 +698,20 @@ export class MyScene extends Phaser.Scene {
     this.monsterQueue.forEach(this.upsertMonster); // 큐 비우기
     this.monsterQueue.length = 0;
 
+    // ── 주기적 몬스터 동기화 (이벤트 유실 복구) ──
+    this.monsterSyncTimer?.remove(false);
+    this.monsterSyncTimer = undefined;
+    if (mapKey === 'dungeon1') {
+      this.monsterSyncTimer = this.time.addEvent({
+        delay: 10_000,          // 10초마다
+        loop: true,
+        callback: () => {
+          this.socket.emit('request_monsters', { map_key: this.currentMap });
+        },
+      });
+    }
+
+    this.events.emit('mapTransition', false) // React 오버레이 해제
     this.isChangingMap = false              // ★ 잠금 해제
   }
 
@@ -680,9 +760,9 @@ export class MyScene extends Phaser.Scene {
     const vy = (this.cursors.up?.isDown ? -1 : this.cursors.down?.isDown ? 1 : 0) * speed
     this.player.setVelocity(vx, vy)
 
-    if (this.anims.exists('stand')) {      // ← 추가
+    if (this.anims.exists('stand') && !this.isAttacking) {
       this.player.play(vx || vy ? 'walk' : 'stand', true);
-    }                                       // ← 추가
+    }
 
     // 전환 중엔 move 패킷 보내지 않음
     if (!this.isChangingMap && (vx || vy)) {

@@ -2,7 +2,8 @@
 import {
   Dialog, DialogTitle, Tabs, Tab, Box, Typography,
   List, ListItemButton, ListItemAvatar, Avatar, ListItemText,
-  TextField, Button, Stack, Divider, Alert
+  TextField, Button, Stack, Divider, Alert,
+  CircularProgress
 } from '@mui/material'
 import {
   ItemDTO, CharItemDTO, fetchShopItems, fetchInventory,
@@ -29,17 +30,30 @@ export default function ShopDialog ({
   const [selId , setSelId ] = useState<number>()
   const [qty   , setQty   ] = useState(1)
   const [msg   , setMsg   ] = useState<string>()
+  const [trading, setTrading] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   /* ───────────────── 목록 로드 ───────────────── */
   useEffect(() => {
     if (!npc) return
+    let cancelled = false
+    setLoading(true);
     (async () => {
-      setItems(await fetchShopItems())
-      setInv(await fetchInventory(charId))
+      const [newItems, newInv] = await Promise.all([
+        fetchShopItems(),
+        fetchInventory(charId),
+      ])
+      if (cancelled) return
+      console.log('[shop] 초기 로드 — shopItems:', newItems.length, 'inv:', newInv.length)
+      setItems(newItems)
+      setInv(newInv)
       setTab('buy')
       setSelId(undefined)
+      setQty(1)
       setMsg(undefined)
+      setLoading(false)
     })()
+    return () => { cancelled = true }
   }, [npc, charId])
 
   if (!npc) return null
@@ -57,7 +71,8 @@ export default function ShopDialog ({
 
   /* 거래 실행 */
   const handleTrade = async () => {
-    if (!selItem) return
+    if (!selItem || trading) return
+    setTrading(true)
     try {
       if (tab === 'buy') {
         const r = await buyItem(npc.id, charId, selItem.id, qty)
@@ -67,12 +82,21 @@ export default function ShopDialog ({
         if (r.error) { setMsg(r.error); return }
       }
       setMsg(undefined)
-      // 인벤토리 & 상점 목록 재로드
-      setInv(await fetchInventory(charId))
-      setItems(await fetchShopItems())
+      // 거래 완료 → 선택·수량 초기화 + 목록 동시 새로고침 (캐시 우회)
+      setSelId(undefined)
+      setQty(1)
+      const [newInv, newItems] = await Promise.all([
+        fetchInventory(charId),
+        fetchShopItems(),
+      ])
+      console.log('[shop] 거래 후 갱신 — inv:', newInv.length, 'shopItems:', newItems.length)
+      setInv(newInv)
+      setItems(newItems)
       onAfterTrade()
     } catch {
       setMsg('network error')
+    } finally {
+      setTrading(false)
     }
   }
 
@@ -87,7 +111,7 @@ export default function ShopDialog ({
 
       <Tabs
         value={tab}
-        onChange={(_, v) => { setTab(v); setSelId(undefined) }}
+        onChange={(_, v) => { setTab(v); setSelId(undefined); setQty(1); setMsg(undefined) }}
         centered
       >
         <Tab label="구입"  value="buy" />
@@ -97,7 +121,14 @@ export default function ShopDialog ({
       <Box sx={{ display: 'flex', height: 420 }}>
         {/* ─────────── 리스트 ─────────── */}
         <List sx={{ flex: 1, overflow: 'auto' }}>
-          {list.length === 0 &&
+          {loading &&
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+              <CircularProgress size={36} />
+              <Typography sx={{ ml: 2 }} color="text.secondary">불러오는 중…</Typography>
+            </Box>
+          }
+
+          {!loading && list.length === 0 &&
             <Typography sx={{ p: 2 }} color="text.secondary">
               {tab === 'buy'
                 ? '구매 가능한 아이템이 없습니다.'
@@ -105,7 +136,7 @@ export default function ShopDialog ({
             </Typography>
           }
 
-          {list.map(i => {
+          {!loading && list.map(i => {
             /* 공통 식별자·썸네일·라벨 계산 */
             const id        = tab === 'buy' ? (i as ItemDTO).id
                                              : (i as CharItemDTO).item_id
@@ -159,10 +190,12 @@ export default function ShopDialog ({
 
               {msg && <Alert severity="error">{msg}</Alert>}
 
-              <Button variant="contained" onClick={handleTrade}>
-                {tab === 'buy'
-                  ? `${selItem.buy_price * qty} G 구매`
-                  : `${selItem.sell_price * qty} G 판매`}
+              <Button variant="contained" onClick={handleTrade} disabled={trading}
+                startIcon={trading ? <CircularProgress size={16} color="inherit" /> : undefined}>
+                {trading ? '처리 중…'
+                  : tab === 'buy'
+                    ? `${selItem.buy_price * qty} G 구매`
+                    : `${selItem.sell_price * qty} G 판매`}
               </Button>
             </>
           ) : (

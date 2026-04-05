@@ -19,7 +19,7 @@ export interface CharacterDTO{
   
   /** 캐릭터 정보를 서버에서 fetch */
   export async function fetchCharacter(charId:number):Promise<CharacterDTO>{
-    const res = await fetch(`${BASE}/api/characters/${charId}`)
+    const res = await fetch(`${BASE}/api/characters/${charId}`, { cache: 'no-store' })
     if(!res.ok) throw new Error('Failed to fetch character')
     return res.json()
   }

@@ -28,7 +28,10 @@ describe('character utils', () => {
     const { fetchCharacter } = await import('../character')
     const result = await fetchCharacter(1)
     expect(result).toEqual(mockData)
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/characters/1'))
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/characters/1'),
+      expect.objectContaining({ cache: 'no-store' })
+    )
   })
 
   it('fetchCharacter throws on failure', async () => {
