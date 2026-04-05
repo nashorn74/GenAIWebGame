@@ -1,5 +1,5 @@
 // src/pages/LoginPage.tsx
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box, Paper, TextField, Button, Typography, Dialog, DialogTitle,
@@ -14,6 +14,31 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [err, setErr]         = useState('')
   const [openSignUp, setOpen] = useState(false)
+
+  /* ─── 배경 음악: autoPlay 대신 useRef + useEffect ─── */
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const tryPlayBgm = useCallback(() => {
+    const el = audioRef.current
+    if (!el || !el.paused) return
+    el.play().catch(() => {})   // 실패해도 무시 — 다음 인터랙션에서 재시도
+  }, [])
+
+  useEffect(() => {
+    // 마운트 시 재생 시도 (브라우저가 허용하면 바로 재생됨)
+    tryPlayBgm()
+
+    // autoplay가 차단된 경우: 첫 사용자 인터랙션 시 재생
+    const unlock = () => { tryPlayBgm(); cleanup() }
+    const cleanup = () => {
+      document.removeEventListener('click', unlock)
+      document.removeEventListener('keydown', unlock)
+    }
+    document.addEventListener('click', unlock, { once: true })
+    document.addEventListener('keydown', unlock, { once: true })
+
+    return cleanup
+  }, [tryPlayBgm])
 
   const doLogin = async () => {
     setErr('')
@@ -70,8 +95,8 @@ export default function LoginPage() {
         position: 'relative',
       }}
     >
-      {/* 배경 음악 */}
-      <audio src="/assets/veins_of_arkacia.mp3" autoPlay loop />
+      {/* 배경 음악 — autoPlay 제거, ref로 제어 */}
+      <audio ref={audioRef} src="/assets/veins_of_arkacia.mp3" loop />
 
       {/* 게임 타이틀 */}
       <Typography
