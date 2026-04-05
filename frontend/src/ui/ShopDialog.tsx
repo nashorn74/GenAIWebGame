@@ -2,7 +2,8 @@
 import {
   Dialog, DialogTitle, Tabs, Tab, Box, Typography,
   List, ListItemButton, ListItemAvatar, Avatar, ListItemText,
-  TextField, Button, Stack, Divider, Alert
+  TextField, Button, Stack, Divider, Alert,
+  CircularProgress
 } from '@mui/material'
 import {
   ItemDTO, CharItemDTO, fetchShopItems, fetchInventory,
@@ -30,17 +31,19 @@ export default function ShopDialog ({
   const [qty   , setQty   ] = useState(1)
   const [msg   , setMsg   ] = useState<string>()
   const [trading, setTrading] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   /* ───────────────── 목록 로드 ───────────────── */
   useEffect(() => {
     if (!npc) return
-    let cancelled = false;
+    let cancelled = false
+    setLoading(true);
     (async () => {
       const [newItems, newInv] = await Promise.all([
         fetchShopItems(),
         fetchInventory(charId),
       ])
-      if (cancelled) return          // 언마운트/재실행 시 stale 업데이트 방지
+      if (cancelled) return
       console.log('[shop] 초기 로드 — shopItems:', newItems.length, 'inv:', newInv.length)
       setItems(newItems)
       setInv(newInv)
@@ -48,6 +51,7 @@ export default function ShopDialog ({
       setSelId(undefined)
       setQty(1)
       setMsg(undefined)
+      setLoading(false)
     })()
     return () => { cancelled = true }
   }, [npc, charId])
@@ -117,7 +121,14 @@ export default function ShopDialog ({
       <Box sx={{ display: 'flex', height: 420 }}>
         {/* ─────────── 리스트 ─────────── */}
         <List sx={{ flex: 1, overflow: 'auto' }}>
-          {list.length === 0 &&
+          {loading &&
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+              <CircularProgress size={36} />
+              <Typography sx={{ ml: 2 }} color="text.secondary">불러오는 중…</Typography>
+            </Box>
+          }
+
+          {!loading && list.length === 0 &&
             <Typography sx={{ p: 2 }} color="text.secondary">
               {tab === 'buy'
                 ? '구매 가능한 아이템이 없습니다.'
@@ -125,7 +136,7 @@ export default function ShopDialog ({
             </Typography>
           }
 
-          {list.map(i => {
+          {!loading && list.map(i => {
             /* 공통 식별자·썸네일·라벨 계산 */
             const id        = tab === 'buy' ? (i as ItemDTO).id
                                              : (i as CharItemDTO).item_id
@@ -179,10 +190,12 @@ export default function ShopDialog ({
 
               {msg && <Alert severity="error">{msg}</Alert>}
 
-              <Button variant="contained" onClick={handleTrade} disabled={trading}>
-                {tab === 'buy'
-                  ? `${selItem.buy_price * qty} G 구매`
-                  : `${selItem.sell_price * qty} G 판매`}
+              <Button variant="contained" onClick={handleTrade} disabled={trading}
+                startIcon={trading ? <CircularProgress size={16} color="inherit" /> : undefined}>
+                {trading ? '처리 중…'
+                  : tab === 'buy'
+                    ? `${selItem.buy_price * qty} G 구매`
+                    : `${selItem.sell_price * qty} G 판매`}
               </Button>
             </>
           ) : (

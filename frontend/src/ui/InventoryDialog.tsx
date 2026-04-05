@@ -1,7 +1,8 @@
 // src/ui/InventoryDialog.tsx
 import {
     Dialog, DialogTitle, DialogContent,
-    Grid, Avatar, Typography, Stack, Button, Alert
+    Grid, Avatar, Typography, Stack, Button, Alert,
+    CircularProgress, Box
   } from '@mui/material'
   import { useEffect, useState } from 'react'
   import { CharItemDTO, fetchInventory, useItem } from '../utils/items'
@@ -17,10 +18,15 @@ import {
     const [items,setItems]=useState<CharItemDTO[]>([])
     const [sel ,setSel ]=useState<CharItemDTO>()
     const [msg, setMsg] = useState<{text:string; severity:'success'|'error'}>()
+    const [loading, setLoading] = useState(false)
 
     useEffect(()=>{
       if(open) {
-        fetchInventory(charId).then(setItems)
+        setLoading(true)
+        fetchInventory(charId).then(data => {
+          setItems(data)
+          setLoading(false)
+        })
         setSel(undefined)
         setMsg(undefined)
       } else {
@@ -59,12 +65,18 @@ import {
       <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
         <DialogTitle>인벤토리</DialogTitle>
         <DialogContent dividers>
-          {items.length===0 &&
+          {loading &&
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={36} />
+              <Typography sx={{ ml: 2 }} color="text.secondary">불러오는 중…</Typography>
+            </Box>}
+
+          {!loading && items.length===0 &&
             <Typography sx={{mb:2}}>
               보유한 아이템이 없습니다.
             </Typography>}
 
-          <Grid container spacing={1}>
+          {!loading && <Grid container spacing={1}>
             {items.map(ci=>(
               <Grid item key={ci.id}>
                 <Stack alignItems="center" spacing={0.5}>
@@ -80,7 +92,7 @@ import {
                 </Stack>
               </Grid>
             ))}
-          </Grid>
+          </Grid>}
 
           {sel &&
             <Stack sx={{mt:2}} spacing={1}>
