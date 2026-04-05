@@ -194,13 +194,19 @@ def create_app():
                         .filter(Monster.died_at.isnot(None))          # safety
                         .all()
                     )
+                    respawned = False
                     for m in dead_ready:
                         if now - m.died_at >= m.respawn_s:
                             m.is_alive = True
                             m.hp       = m.max_hp
                             m.x, m.y   = m.spawn_x, m.spawn_y
                             m.died_at  = None
+                            respawned = True
                             socketio.emit('monster_spawn', m.to_dict(), room='map_dungeon1')
+
+                    # 리스폰 변경분을 즉시 커밋 — 이후 이동/전투 롤백에 영향받지 않도록
+                    if respawned:
+                        db.session.commit()
 
                     # ── 1) 살아있는 몬스터 랜덤 이동 (기존 로직) ──
 

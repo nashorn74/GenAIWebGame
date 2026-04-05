@@ -67,7 +67,9 @@ export default function ShopDialog ({
         if (r.error) { setMsg(r.error); return }
       }
       setMsg(undefined)
-      // 인벤토리 & 상점 목록 재로드
+      // 거래 완료 → 선택·수량 초기화 + 목록 새로고침
+      setSelId(undefined)
+      setQty(1)
       setInv(await fetchInventory(charId))
       setItems(await fetchShopItems())
       onAfterTrade()

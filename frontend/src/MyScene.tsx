@@ -245,8 +245,16 @@ export class MyScene extends Phaser.Scene {
       })
     })
     this.socket.on('monster_despawn', ({id}) => {
-      this.monsters.get(id)?.destroy(true)
-      this.monsters.delete(id)
+      const cont = this.monsters.get(id);
+      if (cont) {
+        // 활성 트윈 정리 후 파괴 — 리스폰 시 잔여 트윈 간섭 방지
+        this.tweens.killTweensOf(cont);
+        cont.each((child: Phaser.GameObjects.GameObject) =>
+          this.tweens.killTweensOf(child));
+        cont.destroy(true);
+      }
+      this.monsters.delete(id);
+      delete this.monstersMeta[id];
     })
 
     /* --- 소켓 이벤트 추가 --- */
