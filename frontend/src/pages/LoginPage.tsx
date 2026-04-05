@@ -1,5 +1,5 @@
 // src/pages/LoginPage.tsx
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box, Paper, TextField, Button, Typography, Dialog, DialogTitle,
@@ -15,30 +15,22 @@ export default function LoginPage() {
   const [err, setErr]         = useState('')
   const [openSignUp, setOpen] = useState(false)
 
-  /* ─── 배경 음악: autoPlay 대신 useRef + useEffect ─── */
+  /* ─── 배경 음악 ───
+   * 핵심: useEffect에서 play()를 호출하지 않는다.
+   *   - 브라우저가 pending play request를 만들면 첫 번째 사용자 제스처를 소비함
+   *   - document 레벨 리스너도 React 이벤트와 경합할 수 있음
+   * 대신: 컨테이너 Box의 onClick으로 오디오 재생 시도.
+   *   - setTimeout(0)으로 지연하여 로그인 등 주요 핸들러가 먼저 완료되도록 함
+   */
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const tryPlayBgm = useCallback(() => {
-    const el = audioRef.current
-    if (!el || !el.paused) return
-    el.play().catch(() => {})   // 실패해도 무시 — 다음 인터랙션에서 재시도
+  const ensureBgm = useCallback(() => {
+    setTimeout(() => {
+      const el = audioRef.current
+      if (!el || !el.paused) return
+      el.play().catch(() => {})
+    }, 0)
   }, [])
-
-  useEffect(() => {
-    // 마운트 시 재생 시도 (브라우저가 허용하면 바로 재생됨)
-    tryPlayBgm()
-
-    // autoplay가 차단된 경우: 첫 사용자 인터랙션 시 재생
-    const unlock = () => { tryPlayBgm(); cleanup() }
-    const cleanup = () => {
-      document.removeEventListener('click', unlock)
-      document.removeEventListener('keydown', unlock)
-    }
-    document.addEventListener('click', unlock, { once: true })
-    document.addEventListener('keydown', unlock, { once: true })
-
-    return cleanup
-  }, [tryPlayBgm])
 
   const doLogin = async (e?: React.FormEvent) => {
     e?.preventDefault()
@@ -87,6 +79,8 @@ export default function LoginPage() {
   /* ------------------- 렌더링 ------------------- */
   return (
     <Box
+      onClick={ensureBgm}
+      onKeyDown={ensureBgm}
       sx={{
         width: '100vw',
         height: '100vh',
@@ -96,8 +90,8 @@ export default function LoginPage() {
         position: 'relative',
       }}
     >
-      {/* 배경 음악 — autoPlay 제거, ref로 제어 */}
-      <audio ref={audioRef} src="/assets/veins_of_arkacia.mp3" loop />
+      {/* 배경 음악 — preload="none"으로 네트워크 경합 방지 */}
+      <audio ref={audioRef} src="/assets/veins_of_arkacia.mp3" loop preload="none" />
 
       {/* 게임 타이틀 */}
       <Typography
