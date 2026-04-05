@@ -600,6 +600,8 @@ export class MyScene extends Phaser.Scene {
     /* 이미 전환 중이면 무시 */
     if (this.isChangingMap) return
     this.isChangingMap = true               // ★ 전환 잠금
+    this.events.emit('mapTransition', true) // React 오버레이 표시
+    this.player.setVisible(false)           // 이전 좌표에서 깜박임 방지
 
     this.mapReady = false;
 
@@ -652,6 +654,7 @@ export class MyScene extends Phaser.Scene {
       (tileX + 0.5) * map.tileWidth,
       (tileY + 0.5) * map.tileHeight
     )
+    this.player.setVisible(true)            // 새 좌표에 도착 → 다시 표시
     this.events.emit('mapKey', mapMeta.display_name)
 
     /* 내 컨테이너는 파괴 후 재생성 → 고스트 방지 */
@@ -698,6 +701,7 @@ export class MyScene extends Phaser.Scene {
       });
     }
 
+    this.events.emit('mapTransition', false) // React 오버레이 해제
     this.isChangingMap = false              // ★ 잠금 해제
   }
 
