@@ -1,17 +1,13 @@
+# CI 스모크 테스트용 — 로컬 빌드 이미지를 사용
 version: "3.8"
 
 services:
   db:
     image: postgres:14
-    container_name: arkacia_db
     environment:
       POSTGRES_DB: my_database
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypass
-    ports:
-      - "5432:5432"
-    volumes:
-      - db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U myuser -d my_database"]
       interval: 2s
@@ -20,11 +16,6 @@ services:
 
   redis:
     image: redis:7
-    container_name: arkacia_redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
@@ -32,34 +23,28 @@ services:
       retries: 10
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: arkacia_backend
-    ports:
-      - "5000:5000"
+    image: arkacia-backend:ci
     environment:
       - DATABASE_URI=postgresql://myuser:mypass@db:5432/my_database
       - REDIS_URL=redis://redis:6379/0
       - EVENTLET_NO_GREENDNS=yes
-      - SECRET_KEY=${SECRET_KEY:-dev-fallback-key}
-      - FLASK_DEBUG=true
+      - SECRET_KEY=ci-test-secret-key
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/maps')"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.dev
-    container_name: arkacia_frontend
+    image: arkacia-frontend:ci
     ports:
-      - "5173:5173"
+      - "8080:80"
     depends_on:
-      - backend
-
-volumes:
-  db_data:
-  redis_data:
+      backend:
+        condition: service_healthy

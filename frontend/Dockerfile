@@ -1,18 +1,19 @@
-# Node 18 LTS 예시
-FROM node:18
-
+# ── Stage 1: Build ──
+FROM node:20-alpine AS build
 WORKDIR /app
 
-# package.json, package-lock.json 복사 → npm install
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
-# 소스 복사
 COPY . .
+ARG VITE_API_BASE_URL=""
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# tsc 타입 체크는 CI에서 별도 실행; Docker 빌드에서는 Vite만 실행
+RUN npx vite build
 
-# Vite 개발 서버가 5173 포트를 사용 (기본)
-EXPOSE 5173
-
-# 개발 모드 시 "npm run dev"
-# 실제 운영이라면 "npm run build" 후 serve 방식
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# ── Stage 2: Serve with nginx ──
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

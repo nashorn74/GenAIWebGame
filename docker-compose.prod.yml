@@ -1,0 +1,71 @@
+# ⚠️  실행 전 환경변수 필수 설정:
+#   export SECRET_KEY=$(openssl rand -hex 32)
+# 또는 .env 파일에 SECRET_KEY, POSTGRES_PASSWORD 등을 정의하세요.
+
+version: "3.8"
+
+services:
+  db:
+    image: postgres:14
+    container_name: arkacia_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-my_database}
+      POSTGRES_USER: ${POSTGRES_USER:-myuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mypass}
+    expose:
+      - "5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-myuser} -d ${POSTGRES_DB:-my_database}"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7
+    container_name: arkacia_redis
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: ghcr.io/nashorn74/genaiwebgame-backend:latest
+    container_name: arkacia_backend
+    expose:
+      - "5000"
+    environment:
+      - DATABASE_URI=postgresql://${POSTGRES_USER:-myuser}:${POSTGRES_PASSWORD:-mypass}@db:5432/${POSTGRES_DB:-my_database}
+      - REDIS_URL=redis://redis:6379/0
+      - EVENTLET_NO_GREENDNS=yes
+      - SECRET_KEY=${SECRET_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/maps')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  frontend:
+    image: ghcr.io/nashorn74/genaiwebgame-frontend:latest
+    container_name: arkacia_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  db_data:
+  redis_data:
