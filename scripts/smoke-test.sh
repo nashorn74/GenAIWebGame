@@ -61,7 +61,7 @@ check_body "GET /api/maps   → JSON"    "$BASE/api/maps"    "\["
 
 echo ""
 echo "── Auth (via nginx proxy) ──"
-check_post "POST /auth/login → 401 (no body)" "$BASE/auth/login" "401"
+check_post "POST /auth/login → 400 (no body)" "$BASE/auth/login" "400"
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
