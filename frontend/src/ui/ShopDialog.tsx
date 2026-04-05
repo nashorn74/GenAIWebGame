@@ -41,6 +41,7 @@ export default function ShopDialog ({
         fetchInventory(charId),
       ])
       if (cancelled) return          // 언마운트/재실행 시 stale 업데이트 방지
+      console.log('[shop] 초기 로드 — shopItems:', newItems.length, 'inv:', newInv.length)
       setItems(newItems)
       setInv(newInv)
       setTab('buy')
@@ -58,9 +59,6 @@ export default function ShopDialog ({
   const list = tab === 'buy'
     ? items
     : inv.filter(ci => ci.item.sell_price > 0)    // 판매 가능 항목
-
-  console.log(`[shop] tab=${tab}, items=${items.length}, inv=${inv.length}, list=${list.length}`,
-    list.map((i: any) => `${i.name ?? i.item?.name}(id=${i.id ?? i.item_id})`));
 
   /* 선택된 아이템 DTO */
   const selItem = tab === 'buy'
@@ -87,6 +85,7 @@ export default function ShopDialog ({
         fetchInventory(charId),
         fetchShopItems(),
       ])
+      console.log('[shop] 거래 후 갱신 — inv:', newInv.length, 'shopItems:', newItems.length)
       setInv(newInv)
       setItems(newItems)
       onAfterTrade()
