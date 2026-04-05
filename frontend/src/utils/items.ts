@@ -2,6 +2,7 @@
 export interface ItemDTO {
     id: number;  name: string;  category: string;
     description: string;  buy_price: number; sell_price: number;
+    effect_value?: number;  attack_power?: number;  defense_power?: number;
   }
   
   export interface CharItemDTO {
@@ -35,6 +36,15 @@ export interface ItemDTO {
   
   export async function sellItem(npcId: number, charId: number, itemId: number, qty=1){
     return fetch(`${BASE}/api/shops/${npcId}/sell`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({character_id: charId, item_id: itemId, quantity: qty})
+    }).then(r=>r.json());
+  }
+
+  /* ───── 소비 아이템 사용 (물약 등) ───── */
+  export async function useItem(charId: number, itemId: number, qty=1) {
+    return fetch(`${BASE}/api/items/use`, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({character_id: charId, item_id: itemId, quantity: qty})

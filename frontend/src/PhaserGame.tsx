@@ -333,6 +333,7 @@ export default function PhaserGame() {
           open={invOpen}
           charId={char?.id!}
           onClose={()=>setInvOpen(false)}
+          onAfterUse={refreshChar}
         />
       </div>
     </ThemeProvider>
