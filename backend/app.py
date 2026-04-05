@@ -120,6 +120,13 @@ def create_app():
 
     CORS(app)
 
+    @app.after_request
+    def add_cache_headers(response):
+        """API GET 응답에 Cache-Control 헤더를 추가하여 브라우저 캐시 방지"""
+        if request.method == 'GET' and request.path.startswith('/api/'):
+            response.headers['Cache-Control'] = 'no-store'
+        return response
+
     @app.teardown_appcontext
     def remove_session(exc=None):
         if exc:
@@ -428,6 +435,15 @@ def create_app():
             'player_spawn', char_d,
             room=f'map_{cur_map}', include_self=False, namespace='/'
         )
+
+    # ── 몬스터 동기화 요청 (주기적 폴링 대응)
+    @socketio.on('request_monsters')
+    def handle_request_monsters(data):
+        map_key = data.get('map_key')
+        if not map_key:
+            return
+        monsters = Monster.query.filter_by(map_key=map_key, is_alive=True).all()
+        emit('current_monsters', [m.to_dict() for m in monsters])
 
     # ② 이동
     @socketio.on('move')

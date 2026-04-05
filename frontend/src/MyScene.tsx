@@ -70,6 +70,7 @@ export class MyScene extends Phaser.Scene {
   private mapReady = false;           //  ← ② 추가
   private isAttacking = false;        // 공격 애니메이션 재생 중 플래그
   private attackTimer?: Phaser.Time.TimerEvent;  // 공격 타이머 (중복 방지)
+  private monsterSyncTimer?: Phaser.Time.TimerEvent;  // 주기적 몬스터 동기화
 
   upsertMonster = (m:any)=>{
     if(!this.mapReady){          // 아직 맵 세팅 중이면
@@ -224,24 +225,34 @@ export class MyScene extends Phaser.Scene {
       this.removeActor(id);
     });
 
-    this.socket.on('current_monsters', arr =>
-      arr.forEach(this.upsertMonster)          // ← 수정!
-    );
+    this.socket.on('current_monsters', (arr: any[]) => {
+      // ── 양방향 동기화: 서버에 없는 몬스터 제거 ──
+      const serverIds = new Set(arr.map((m: any) => m.id));
+      for (const [id, cont] of this.monsters) {
+        if (!serverIds.has(id)) {
+          this.tweens.killTweensOf(cont);
+          cont.each((child: Phaser.GameObjects.GameObject) =>
+            this.tweens.killTweensOf(child));
+          cont.destroy(true);
+          this.monsters.delete(id);
+          delete this.monstersMeta[id];
+        }
+      }
+      // ── 서버 몬스터 upsert ──
+      arr.forEach(this.upsertMonster);
+    });
     this.socket.on('monster_spawn',    this.upsertMonster); // ← 수정!
     this.socket.on('monster_move', p => {
+      if (!this.mapReady) return            // 맵 전환 중엔 무시
       const cont = this.monsters.get(p.id)
       if (!cont || !this.tilemap) return
-    
+
       const dstX = (p.x + 0.5) * this.tilemap.tileWidth
       const dstY = (p.y + 0.5) * this.tilemap.tileHeight
-    
+
       // 이미 그 위치라면 아무것도 안 함
       if (Math.abs(cont.x - dstX) < 1 && Math.abs(cont.y - dstY) < 1) return
 
-      if(!this.monsters.has(p.id)){
-        this.upsertMonster({...p, sprite1:'dummy.png', sprite2:'dummy.png', species:''});
-      }
-    
       // 8-프레임(≈0.13s) 동안 선형 이동 → “뚝” 사라지는 느낌 제거
       this.tweens.add({
         targets: cont,
@@ -593,6 +604,8 @@ export class MyScene extends Phaser.Scene {
     this.mapReady = false;
 
     /* ─ 이전 리소스 정리 ─ */
+    this.monsterSyncTimer?.remove(false);
+    this.monsterSyncTimer = undefined;
     this.playerCollider?.destroy()
     this.layer?.destroy()
     if (this.npcGroup) {
@@ -671,6 +684,19 @@ export class MyScene extends Phaser.Scene {
     this.mapReady = true;          // 이제 화면 그릴 준비 완료
     this.monsterQueue.forEach(this.upsertMonster); // 큐 비우기
     this.monsterQueue.length = 0;
+
+    // ── 주기적 몬스터 동기화 (이벤트 유실 복구) ──
+    this.monsterSyncTimer?.remove(false);
+    this.monsterSyncTimer = undefined;
+    if (mapKey === 'dungeon1') {
+      this.monsterSyncTimer = this.time.addEvent({
+        delay: 10_000,          // 10초마다
+        loop: true,
+        callback: () => {
+          this.socket.emit('request_monsters', { map_key: this.currentMap });
+        },
+      });
+    }
 
     this.isChangingMap = false              // ★ 잠금 해제
   }

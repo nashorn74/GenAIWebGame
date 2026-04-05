@@ -13,14 +13,14 @@ export interface ItemDTO {
   
   /* ───── 상점용: 구입 가능한 아이템( buy_price>0 )만 가져오기 ───── */
   export async function fetchShopItems(): Promise<ItemDTO[]> {
-    const r = await fetch(`${BASE}/api/items`);
+    const r = await fetch(`${BASE}/api/items`, { cache: 'no-store' });
     const data: ItemDTO[] = await r.json();
     return data.filter(i => i.buy_price > 0);
   }
   
   /* ───── 캐릭터 인벤토리 ───── */
   export async function fetchInventory(charId: number): Promise<CharItemDTO[]> {
-    const r = await fetch(`${BASE}/api/characters/${charId}`);
+    const r = await fetch(`${BASE}/api/characters/${charId}`, { cache: 'no-store' });
     const c = await r.json();
     return c.items as CharItemDTO[];
   }

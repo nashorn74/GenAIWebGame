@@ -29,6 +29,7 @@ export default function ShopDialog ({
   const [selId , setSelId ] = useState<number>()
   const [qty   , setQty   ] = useState(1)
   const [msg   , setMsg   ] = useState<string>()
+  const [trading, setTrading] = useState(false)
 
   /* ───────────────── 목록 로드 ───────────────── */
   useEffect(() => {
@@ -65,7 +66,8 @@ export default function ShopDialog ({
 
   /* 거래 실행 */
   const handleTrade = async () => {
-    if (!selItem) return
+    if (!selItem || trading) return
+    setTrading(true)
     try {
       if (tab === 'buy') {
         const r = await buyItem(npc.id, charId, selItem.id, qty)
@@ -75,7 +77,7 @@ export default function ShopDialog ({
         if (r.error) { setMsg(r.error); return }
       }
       setMsg(undefined)
-      // 거래 완료 → 선택·수량 초기화 + 목록 동시 새로고침 (레이스 컨디션 방지)
+      // 거래 완료 → 선택·수량 초기화 + 목록 동시 새로고침 (캐시 우회)
       setSelId(undefined)
       setQty(1)
       const [newInv, newItems] = await Promise.all([
@@ -87,6 +89,8 @@ export default function ShopDialog ({
       onAfterTrade()
     } catch {
       setMsg('network error')
+    } finally {
+      setTrading(false)
     }
   }
 
@@ -173,7 +177,7 @@ export default function ShopDialog ({
 
               {msg && <Alert severity="error">{msg}</Alert>}
 
-              <Button variant="contained" onClick={handleTrade}>
+              <Button variant="contained" onClick={handleTrade} disabled={trading}>
                 {tab === 'buy'
                   ? `${selItem.buy_price * qty} G 구매`
                   : `${selItem.sell_price * qty} G 판매`}
