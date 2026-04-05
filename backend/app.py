@@ -683,16 +683,21 @@ if __name__ == '__main__':
             db.session.commit()
             print(f'[migration] {len(dupes)}건 중복 통합 완료')
 
-        # unique constraint 추가 시도 (이미 있으면 무시)
-        try:
+        # unique constraint 추가 (이미 있으면 스킵)
+        exists = db.session.execute(db.text(
+            "SELECT 1 FROM information_schema.table_constraints "
+            "WHERE constraint_name = 'uq_char_item' "
+            "AND table_name = 'character_items'"
+        )).fetchone()
+        if not exists:
             db.session.execute(db.text(
                 'ALTER TABLE character_items '
                 'ADD CONSTRAINT uq_char_item UNIQUE (character_id, item_id)'
             ))
             db.session.commit()
             print('[migration] uq_char_item 제약조건 추가 완료')
-        except Exception:
-            db.session.rollback()   # 이미 존재하면 무시
+        else:
+            print('[migration] uq_char_item 제약조건 이미 존재 — 스킵')
 
         # 예: Greenfield NPC들을 DB에 미리 추가 (개발용)
         # 1) NPC 시드
@@ -881,5 +886,4 @@ if __name__ == '__main__':
                  host='0.0.0.0',
                  port=5000,
                  debug=debug,
-                 allow_unsafe_werkzeug=debug,
                  )
