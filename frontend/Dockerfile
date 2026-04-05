@@ -8,7 +8,8 @@ RUN npm ci
 COPY . .
 ARG VITE_API_BASE_URL=""
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
-RUN npm run build
+# tsc 타입 체크는 CI에서 별도 실행; Docker 빌드에서는 Vite만 실행
+RUN npx vite build
 
 # ── Stage 2: Serve with nginx ──
 FROM nginx:alpine
