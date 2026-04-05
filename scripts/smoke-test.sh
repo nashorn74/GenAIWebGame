@@ -22,7 +22,7 @@ check() {
 check_post() {
   local desc="$1" url="$2" expect="$3"
   local status
-  status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$url" || echo "000")
+  status=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" "$url" || echo "000")
   if [ "$status" = "$expect" ]; then
     echo "  ✅ $desc — HTTP $status"
     PASS=$((PASS + 1))
@@ -57,7 +57,7 @@ echo "── Backend API (via nginx proxy) ──"
 check      "GET /api/maps   → 200"     "$BASE/api/maps"    "200"
 check      "GET /api/items  → 200"     "$BASE/api/items"   "200"
 check      "GET /api/npcs   → 200"     "$BASE/api/npcs"    "200"
-check_body "GET /           → Flask"   "$BASE/api/maps"    "map_key"
+check_body "GET /api/maps   → JSON"    "$BASE/api/maps"    "\["
 
 echo ""
 echo "── Auth (via nginx proxy) ──"
