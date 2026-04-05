@@ -429,17 +429,23 @@ export class MyScene extends Phaser.Scene {
     });
 
     this.socket.on('exp_gain', (e:{
-      char_id:number, exp:number, total_exp:number, level:number, level_up?:boolean
+      char_id:number, exp:number, total_exp:number, level:number, level_up?:boolean,
+      hp?:number, max_hp?:number, mp?:number, max_mp?:number
     })=>{
       if (e.char_id !== this.meId) return;
 
-      console.log(`[EXP] +${e.exp} → Lv.${e.level}`);
+      console.log(`[EXP] +${e.exp} → Lv.${e.level}`, e.level_up ? `HP=${e.hp}/${e.max_hp}` : '');
 
-      /* 👉 EXP / 레벨 패치 */
-      this.events.emit('charUpdate', {
+      /* 👉 EXP / 레벨 / HP·MP 패치 */
+      const patch: Record<string, unknown> = {
         exp   : e.total_exp,
-        level : e.level
-      });
+        level : e.level,
+      };
+      if (e.hp     != null) patch.hp     = e.hp;
+      if (e.max_hp != null) patch.max_hp = e.max_hp;
+      if (e.mp     != null) patch.mp     = e.mp;
+      if (e.max_mp != null) patch.max_mp = e.max_mp;
+      this.events.emit('charUpdate', patch);
 
       /* ───── 눈에 띄는 레벨-업 연출 ───── */
       if (e.level_up){

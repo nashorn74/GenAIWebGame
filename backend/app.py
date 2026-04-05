@@ -556,7 +556,9 @@ def create_app():
             # 클라이언트에 알림
             socketio.emit('exp_gain', {
                 "char_id": char.id, "exp": gained,
-                "total_exp": char.exp, "level": char.level, "level_up"  : level_up
+                "total_exp": char.exp, "level": char.level, "level_up": level_up,
+                "hp": char.hp, "max_hp": char.max_hp,
+                "mp": char.mp, "max_mp": char.max_mp,
             }, room=f"map_{new_map}")
             
             if mob.drop_item_id:                           # NULL 가드
