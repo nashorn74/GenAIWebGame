@@ -69,6 +69,7 @@ export class MyScene extends Phaser.Scene {
   private monsterQueue: any[] = [];   //  ← ① 추가
   private mapReady = false;           //  ← ② 추가
   private isAttacking = false;        // 공격 애니메이션 재생 중 플래그
+  private attackTimer?: Phaser.Time.TimerEvent;  // 공격 타이머 (중복 방지)
 
   upsertMonster = (m:any)=>{
     if(!this.mapReady){          // 아직 맵 세팅 중이면
@@ -184,9 +185,15 @@ export class MyScene extends Phaser.Scene {
       this.events.emit("chat_message", msg)
     })
 
-    /* 3. 연결 후에 join_map 보내는지 확인 */
+    /* 3. 연결(재연결 포함) 시 현재 맵 room 재가입 */
     this.socket.on('connect', () => {
       console.log('[socket] connected id=', this.socket.id)
+      if (this.currentMap) {
+        this.socket.emit('join_map', {
+          character_id: this.meId,
+          map_key: this.currentMap,
+        });
+      }
     })
     this.socket.on('disconnect',()=>console.log('[socket] disconnect'))
 
@@ -262,17 +269,23 @@ export class MyScene extends Phaser.Scene {
       const cont = this.monsters.get(info.id);
       if (!cont || !this.tilemap) return;
 
-      /* ⓪ 공격 애니메이션 재생 */
-      if (this.anims.exists('attack')) {
-        this.isAttacking = true;
-        this.player.play('attack', true);
-        this.time.delayedCall(ATTACK_ANIM_DURATION, () => {
-          this.isAttacking = false;
-        });
-      }
-
-      /* ① 카메라 & 히트-스톱 + SFX */
+      /* ⓪ 공격 애니메이션 — 본인이 때린 경우만, 사망 시 즉시 중단 */
       const isFatal = info.hp <= 0;
+      if (info.attacker_id === this.meId && this.anims.exists('attack')) {
+        if (isFatal) {
+          // 킬 — 즉시 공격 종료
+          this.attackTimer?.remove(false);
+          this.isAttacking = false;
+        } else {
+          // 타격 — 공격 애니메이션 재생(타이머 갱신)
+          this.attackTimer?.remove(false);
+          this.isAttacking = true;
+          this.player.play('attack', true);
+          this.attackTimer = this.time.delayedCall(ATTACK_ANIM_DURATION, () => {
+            this.isAttacking = false;
+          });
+        }
+      }
       if (isFatal) { playKillSfx().catch(() => {}); } else { playHitSfx().catch(() => {}); }
 
       this.cameras.main.shake(

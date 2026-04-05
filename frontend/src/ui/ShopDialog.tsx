@@ -33,13 +33,21 @@ export default function ShopDialog ({
   /* ───────────────── 목록 로드 ───────────────── */
   useEffect(() => {
     if (!npc) return
+    let cancelled = false;
     (async () => {
-      setItems(await fetchShopItems())
-      setInv(await fetchInventory(charId))
+      const [newItems, newInv] = await Promise.all([
+        fetchShopItems(),
+        fetchInventory(charId),
+      ])
+      if (cancelled) return          // 언마운트/재실행 시 stale 업데이트 방지
+      setItems(newItems)
+      setInv(newInv)
       setTab('buy')
       setSelId(undefined)
+      setQty(1)
       setMsg(undefined)
     })()
+    return () => { cancelled = true }
   }, [npc, charId])
 
   if (!npc) return null
@@ -67,11 +75,15 @@ export default function ShopDialog ({
         if (r.error) { setMsg(r.error); return }
       }
       setMsg(undefined)
-      // 거래 완료 → 선택·수량 초기화 + 목록 새로고침
+      // 거래 완료 → 선택·수량 초기화 + 목록 동시 새로고침 (레이스 컨디션 방지)
       setSelId(undefined)
       setQty(1)
-      setInv(await fetchInventory(charId))
-      setItems(await fetchShopItems())
+      const [newInv, newItems] = await Promise.all([
+        fetchInventory(charId),
+        fetchShopItems(),
+      ])
+      setInv(newInv)
+      setItems(newItems)
       onAfterTrade()
     } catch {
       setMsg('network error')
@@ -89,7 +101,7 @@ export default function ShopDialog ({
 
       <Tabs
         value={tab}
-        onChange={(_, v) => { setTab(v); setSelId(undefined) }}
+        onChange={(_, v) => { setTab(v); setSelId(undefined); setQty(1); setMsg(undefined) }}
         centered
       >
         <Tab label="구입"  value="buy" />

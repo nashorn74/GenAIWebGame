@@ -562,6 +562,7 @@ def create_app():
         # ── 5. 결과 브로드캐스트 ─────────────────────────────────
         socketio.emit('monster_hit',
                     {'id' : mob.id,
+                    'attacker_id': char_id,
                     'dmg': dmg,
                     'hp' : mob.hp,
                     'x'  : mob.x,
