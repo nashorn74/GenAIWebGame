@@ -36,6 +36,7 @@ const PLAYER_DMG_STROKE   = 4
 const PLAYER_DMG_YOFF     = 80
 const PLAYER_DMG_FLOAT    = 45
 const PLAYER_DMG_FLOAT_DUR = 700
+const ATTACK_ANIM_DURATION = 400   // ms — 공격 애니메이션 유지 시간
 
 export class MyScene extends Phaser.Scene {
   /* ▽▽ 필드 ▽▽ */
@@ -67,6 +68,7 @@ export class MyScene extends Phaser.Scene {
   private monstersMeta: Record<number, { max_hp:number }> = {};
   private monsterQueue: any[] = [];   //  ← ① 추가
   private mapReady = false;           //  ← ② 추가
+  private isAttacking = false;        // 공격 애니메이션 재생 중 플래그
 
   upsertMonster = (m:any)=>{
     if(!this.mapReady){          // 아직 맵 세팅 중이면
@@ -94,6 +96,8 @@ export class MyScene extends Phaser.Scene {
     this.load.image('char_stand2','char1_stand2.png')
     this.load.image('char_walk1' ,'char1_walk1.png')
     this.load.image('char_walk2' ,'char1_walk2.png')
+    this.load.image('char_attack1','char1_attack1.png')
+    this.load.image('char_attack2','char1_attack2.png')
 
     /* --- NPC 스프라이트(stand 2컷) --- */
     for (let i = 1; i <= 10; i++) {
@@ -249,7 +253,16 @@ export class MyScene extends Phaser.Scene {
     this.socket.on('monster_hit', (info)=>{
       const cont = this.monsters.get(info.id);
       if (!cont || !this.tilemap) return;
-    
+
+      /* ⓪ 공격 애니메이션 재생 */
+      if (this.anims.exists('attack')) {
+        this.isAttacking = true;
+        this.player.play('attack', true);
+        this.time.delayedCall(ATTACK_ANIM_DURATION, () => {
+          this.isAttacking = false;
+        });
+      }
+
       /* ① 카메라 & 히트-스톱 + SFX */
       const isFatal = info.hp <= 0;
       if (isFatal) { playKillSfx().catch(() => {}); } else { playHitSfx().catch(() => {}); }
@@ -446,6 +459,12 @@ export class MyScene extends Phaser.Scene {
       key: 'walk',
       frames: [{ key: 'char_walk1' }, { key: 'char_walk2' }],
       frameRate: 4,
+      repeat: -1,
+    })
+    this.anims.create({
+      key: 'attack',
+      frames: [{ key: 'char_attack1' }, { key: 'char_attack2' }],
+      frameRate: 6,
       repeat: -1,
     })
 
@@ -680,9 +699,9 @@ export class MyScene extends Phaser.Scene {
     const vy = (this.cursors.up?.isDown ? -1 : this.cursors.down?.isDown ? 1 : 0) * speed
     this.player.setVelocity(vx, vy)
 
-    if (this.anims.exists('stand')) {      // ← 추가
+    if (this.anims.exists('stand') && !this.isAttacking) {
       this.player.play(vx || vy ? 'walk' : 'stand', true);
-    }                                       // ← 추가
+    }
 
     // 전환 중엔 move 패킷 보내지 않음
     if (!this.isChangingMap && (vx || vy)) {
