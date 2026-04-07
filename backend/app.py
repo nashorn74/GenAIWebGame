@@ -113,12 +113,16 @@ def create_app():
     app.config.from_object(Config)
 
     db.init_app(app)
-    socketio = SocketIO(app, 
-                        cors_allowed_origins="*", 
+
+    cors_origins = os.environ.get("CORS_ORIGINS", "*")
+    allowed_origins = cors_origins if cors_origins == "*" else cors_origins.split(",")
+
+    socketio = SocketIO(app,
+                        cors_allowed_origins=allowed_origins,
                         async_mode='eventlet',     # A: thread → eventlet
     )
 
-    CORS(app)
+    CORS(app, origins=allowed_origins)
 
     @app.after_request
     def add_cache_headers(response):

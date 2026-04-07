@@ -45,6 +45,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - EVENTLET_NO_GREENDNS=yes
       - SECRET_KEY=${SECRET_KEY}
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
     depends_on:
       db:
         condition: service_healthy
