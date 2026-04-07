@@ -7,8 +7,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Select, MenuItem, FormControl, InputLabel
 } from '@mui/material'
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+import { fetchItems as apiFetchItems, createItem as apiCreateItem, updateItem as apiUpdateItem, deleteItem as apiDeleteItem } from '../api'
 
 interface ItemData {
   id: number
@@ -38,12 +37,7 @@ export default function AdminItems() {
 
   const loadItems = async () => {
     try {
-      let url = `${BASE_URL}/api/items`
-      if (categoryFilter) {
-        url += `?category=${categoryFilter}`
-      }
-      const res = await fetch(url)
-      const data = await res.json()
+      const data = await apiFetchItems(categoryFilter || undefined)
       setItems(data)
     } catch (err) {
       console.error('Failed to load items', err)
@@ -123,56 +117,27 @@ export default function AdminItems() {
 
     try {
       if (isEditing && selectedItem) {
-        // PUT
-        const res = await fetch(`${BASE_URL}/api/items/${selectedItem.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        })
-        if (res.ok) {
-          alert('Item updated')
-          loadItems()
-          handleCloseDialog()
-        } else {
-          const err = await res.json()
-          alert(err.error || 'Failed to update item')
-        }
+        await apiUpdateItem(selectedItem.id, payload)
+        alert('Item updated')
       } else {
-        // POST
-        const res = await fetch(`${BASE_URL}/api/items`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        })
-        if (res.ok) {
-          alert('Item created')
-          loadItems()
-          handleCloseDialog()
-        } else {
-          const err = await res.json()
-          alert(err.error || 'Failed to create item')
-        }
+        await apiCreateItem(payload)
+        alert('Item created')
       }
-    } catch (err) {
-      alert('Network error')
+      loadItems()
+      handleCloseDialog()
+    } catch (err: any) {
+      alert(err.message || 'Network error')
     }
   }
 
   const handleDelete = async (item: ItemData) => {
     if (!window.confirm(`Really delete item "${item.name}"?`)) return
     try {
-      const res = await fetch(`${BASE_URL}/api/items/${item.id}`, {
-        method: 'DELETE'
-      })
-      if (res.ok) {
-        alert('Item deleted')
-        loadItems()
-      } else {
-        const err = await res.json()
-        alert(err.error || 'Failed to delete item')
-      }
-    } catch (err) {
-      alert('Network error')
+      await apiDeleteItem(item.id)
+      alert('Item deleted')
+      loadItems()
+    } catch (err: any) {
+      alert(err.message || 'Network error')
     }
   }
 

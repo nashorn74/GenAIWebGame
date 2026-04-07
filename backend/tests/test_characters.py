@@ -142,3 +142,73 @@ def test_update_stats(client):
     assert c["hp"] == 50
     assert c["str"] == 20
     assert c["dex"] == 15
+
+
+def test_update_stats_mp_intl_status(client):
+    uid = _register(client, "statuser2")
+    cid = client.post("/api/characters", json={
+        "user_id": uid, "name": "StatChar2", "job": "mage",
+    }).get_json()["character"]["id"]
+    resp = client.patch(f"/api/characters/{cid}/stats", json={
+        "mp": 30, "intl": 25, "status_effects": "poison",
+    })
+    assert resp.status_code == 200
+    c = resp.get_json()["character"]
+    assert c["mp"] == 30
+    assert c["intl"] == 25
+    assert c["status_effects"] == "poison"
+
+
+def test_create_character_invalid_job(client):
+    uid = _register(client, "joberr01")
+    resp = client.post("/api/characters", json={
+        "user_id": uid, "name": "BadJob", "job": "ninja",
+    })
+    assert resp.status_code == 400
+    assert "Invalid job" in resp.get_json()["error"]
+
+
+def test_create_character_name_too_short(client):
+    uid = _register(client, "nameerr1")
+    resp = client.post("/api/characters", json={
+        "user_id": uid, "name": "A", "job": "warrior",
+    })
+    assert resp.status_code == 400
+    assert "length" in resp.get_json()["error"].lower()
+
+
+def test_create_character_invalid_user(client):
+    resp = client.post("/api/characters", json={
+        "user_id": 99999, "name": "NoUser", "job": "warrior",
+    })
+    assert resp.status_code == 400
+    assert "user_id" in resp.get_json()["error"].lower()
+
+
+def test_move_character(client):
+    uid = _register(client, "moveuser1")
+    cid = client.post("/api/characters", json={
+        "user_id": uid, "name": "MoveChar", "job": "warrior",
+    }).get_json()["character"]["id"]
+    resp = client.patch(f"/api/characters/{cid}/move", json={
+        "map_key": "city2", "x": 1280, "y": 1536,
+    })
+    assert resp.status_code == 200
+    c = resp.get_json()["character"]
+    assert c["map_key"] == "city2"
+    assert c["x"] == 1280
+    assert c["y"] == 1536
+
+
+def test_update_character_gender_hair(client):
+    uid = _register(client, "ghuser01")
+    cid = client.post("/api/characters", json={
+        "user_id": uid, "name": "GHChar", "job": "warrior",
+    }).get_json()["character"]["id"]
+    resp = client.put(f"/api/characters/{cid}", json={
+        "gender": "male", "hair_color": "black",
+    })
+    assert resp.status_code == 200
+    c = resp.get_json()["character"]
+    assert c["gender"] == "male"
+    assert c["hair_color"] == "black"

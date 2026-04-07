@@ -5,8 +5,7 @@ import {
   Paper, TableContainer, Typography, TextField, Button,
   Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material'
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+import { fetchCharacters as apiFetchCharacters, fetchCharacterDetail as apiFetchCharacterDetail, gainExp as apiGainExp, deleteCharacter as apiDeleteCharacter } from '../api'
 
 interface CharacterData {
   id: number
@@ -41,14 +40,9 @@ export default function AdminCharacters() {
 
   // 초기 로드: 전체 캐릭터 목록 불러오기
   useEffect(() => {
-    fetch(`${BASE_URL}/api/characters`)
-      .then(res => res.json())
-      .then(data => {
-        setCharacters(data)
-      })
-      .catch(err => {
-        console.error('Error fetching characters:', err)
-      })
+    apiFetchCharacters()
+      .then(data => setCharacters(data))
+      .catch(err => console.error('Error fetching characters:', err))
   }, [])
 
   // 간단한 클라이언트 검색(필터) - 캐릭터 이름
@@ -64,21 +58,11 @@ export default function AdminCharacters() {
     setCharDetail(null)
     setDetailError('')
     try {
-      const res = await fetch(`${BASE_URL}/api/characters/${char.id}`)
-      if (!res.ok) {
-        if (res.status === 404) {
-          setDetailError('Character detail not found.')
-        } else {
-          setDetailError('Failed to load character detail.')
-        }
-        setOpenDetail(true)
-        return
-      }
-      const detail = await res.json()
+      const detail = await apiFetchCharacterDetail(char.id)
       setCharDetail(detail)
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      setDetailError('Network error while fetching character detail.')
+      setDetailError(err.message || 'Network error while fetching character detail.')
     }
     setOpenDetail(true)
   }
@@ -94,26 +78,14 @@ export default function AdminCharacters() {
   // 예: PATCH /api/characters/:id/gain_exp { amount: 150 }
   const handleGainExp = async (char: CharacterData, amount: number) => {
     try {
-      const res = await fetch(`${BASE_URL}/api/characters/${char.id}/gain_exp`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount })
-      })
-      if (res.ok) {
-        const updated = await res.json()
-        alert(updated.message)
-        // 목록도 업데이트
-        setCharacters(prev => prev.map(c => c.id === char.id ? updated.character : c))
-        // 상세 열려있다면 갱신
-        if (charDetail && charDetail.id === char.id) {
-          setCharDetail(updated.character)
-        }
-      } else {
-        const errData = await res.json()
-        alert(errData.error || 'Failed to gain exp')
+      const updated = await apiGainExp(char.id, amount)
+      alert(updated.message)
+      setCharacters(prev => prev.map(c => c.id === char.id ? updated.character : c))
+      if (charDetail && charDetail.id === char.id) {
+        setCharDetail(updated.character)
       }
-    } catch (err) {
-      alert('Network error while gaining exp.')
+    } catch (err: any) {
+      alert(err.message || 'Network error while gaining exp.')
     }
   }
 
@@ -121,19 +93,14 @@ export default function AdminCharacters() {
   const handleDelete = async (char: CharacterData) => {
     if (!window.confirm(`Really delete character "${char.name}" ?`)) return
     try {
-      const res = await fetch(`${BASE_URL}/api/characters/${char.id}`, { method: 'DELETE' })
-      if (res.ok) {
-        alert('Character deleted')
-        setCharacters(prev => prev.filter(c => c.id !== char.id))
-        // 만약 상세 모달 열려있다면 닫기
-        if (charDetail?.id === char.id) {
-          handleCloseDetail()
-        }
-      } else {
-        alert('Failed to delete character')
+      await apiDeleteCharacter(char.id)
+      alert('Character deleted')
+      setCharacters(prev => prev.filter(c => c.id !== char.id))
+      if (charDetail?.id === char.id) {
+        handleCloseDetail()
       }
-    } catch (err) {
-      alert('Network error while deleting character.')
+    } catch (err: any) {
+      alert(err.message || 'Network error while deleting character.')
     }
   }
 

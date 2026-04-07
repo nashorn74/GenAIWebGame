@@ -5,8 +5,7 @@ import {
   Paper, TableContainer, Typography, TextField, Button,
   Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material'
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+import { fetchMaps as apiFetchMaps, createMap as apiCreateMap, updateMap as apiUpdateMap, deleteMap as apiDeleteMap } from '../api'
 
 interface MapData {
   key: string
@@ -35,8 +34,7 @@ export default function AdminMaps() {
 
   const loadMaps = async () => {
     try {
-      const res = await fetch(`${BASE_URL}/api/maps`)
-      const data = await res.json()
+      const data = await apiFetchMaps()
       setMaps(data)
     } catch (err) {
       console.error('Failed to load maps', err)
@@ -100,57 +98,27 @@ export default function AdminMaps() {
 
     try {
       if (isEditing && selectedMap) {
-        // PUT /maps/:key
-        const res = await fetch(`${BASE_URL}/api/maps/${selectedMap.key}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        })
-        if (res.ok) {
-          alert('Map updated')
-          // reload
-          loadMaps()
-          handleCloseDialog()
-        } else {
-          const err = await res.json()
-          alert(err.error || 'Failed to update map')
-        }
+        await apiUpdateMap(selectedMap.key, payload)
+        alert('Map updated')
       } else {
-        // POST /maps
-        const res = await fetch(`${BASE_URL}/api/maps`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        })
-        if (res.ok) {
-          alert('Map created')
-          loadMaps()
-          handleCloseDialog()
-        } else {
-          const err = await res.json()
-          alert(err.error || 'Failed to create map')
-        }
+        await apiCreateMap(payload)
+        alert('Map created')
       }
-    } catch (err) {
-      alert('Network error')
+      loadMaps()
+      handleCloseDialog()
+    } catch (err: any) {
+      alert(err.message || 'Network error')
     }
   }
 
   const handleDelete = async (m: MapData) => {
     if (!window.confirm(`Really delete map "${m.key}"?`)) return
     try {
-      const res = await fetch(`${BASE_URL}/api/maps/${m.key}`, {
-        method: 'DELETE'
-      })
-      if (res.ok) {
-        alert('Map deleted')
-        loadMaps()
-      } else {
-        const err = await res.json()
-        alert(err.error || 'Failed to delete map')
-      }
-    } catch (err) {
-      alert('Network error')
+      await apiDeleteMap(m.key)
+      alert('Map deleted')
+      loadMaps()
+    } catch (err: any) {
+      alert(err.message || 'Network error')
     }
   }
 

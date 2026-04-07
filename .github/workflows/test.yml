@@ -8,6 +8,7 @@ on:
   workflow_call:      # deploy.yml 등에서 재사용 가능
 
 jobs:
+  # ── 1) 백엔드 유닛 테스트 + 커버리지 ──
   backend:
     name: Backend Tests (pytest)
     runs-on: ubuntu-latest
@@ -27,8 +28,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Run tests
-        run: python -m pytest -v --tb=short --junitxml=../test-results/backend.xml
+      - name: Run tests with coverage
+        run: |
+          python -m pytest -v --tb=short \
+            --junitxml=../test-results/backend.xml \
+            --cov=. --cov-report=xml:../coverage/backend/coverage.xml \
+            --cov-report=json:../coverage/backend/coverage.json \
+            --cov-report=term
 
       - name: Upload test results
         if: always()
@@ -37,6 +43,14 @@ jobs:
           name: backend-test-results
           path: test-results/backend.xml
 
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: coverage/backend/
+
+  # ── 2) 프론트엔드 유닛 테스트 + 커버리지 ──
   frontend:
     name: Frontend Tests (vitest)
     runs-on: ubuntu-latest
@@ -59,8 +73,11 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
-      - name: Run tests
-        run: npx vitest run --reporter=junit --outputFile=../test-results/frontend.xml
+      - name: Run tests with coverage
+        run: |
+          npx vitest run --coverage \
+            --reporter=junit --outputFile=../test-results/frontend.xml \
+            --reporter=default
 
       - name: Upload test results
         if: always()
@@ -69,26 +86,221 @@ jobs:
           name: frontend-test-results
           path: test-results/frontend.xml
 
-  report:
-    name: Test Report
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage
+          path: coverage/frontend/
+
+  # ── 3) 통합 테스트 (Docker Compose + Smoke Test) ──
+  integration:
+    name: Integration Tests (Docker)
     needs: [backend, frontend]
-    if: always()
     runs-on: ubuntu-latest
-    permissions:
-      checks: write           # dorny/test-reporter creates check runs
-      pull-requests: write    # dorny/test-reporter posts PR comments
 
     steps:
       - uses: actions/checkout@v6
 
+      - name: Build backend image
+        run: docker build -t arkacia-backend:ci ./backend
+
+      - name: Build frontend image
+        run: docker build -t arkacia-frontend:ci ./frontend
+
+      - name: Start containers
+        run: docker compose -f docker-compose.ci.yml up -d --wait --wait-timeout 60
+
+      - name: Run smoke tests (health check)
+        run: bash scripts/smoke-test.sh | tee smoke-output.txt
+
+      - name: Run integration tests (user flow)
+        run: bash scripts/integration-test.sh | tee integration-output.txt
+
+      - name: Generate JUnit XML from test results
+        if: always()
+        run: |
+          mkdir -p test-results
+          bash scripts/smoke-to-junit.sh smoke-output.txt test-results/smoke.xml
+          bash scripts/smoke-to-junit.sh integration-output.txt test-results/integration.xml
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-test-results
+          path: test-results/
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.ci.yml logs
+
+      - name: Stop containers
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v
+
+  # ── 4) 테스트 리포트 + 커버리지 서머리 ──
+  report:
+    name: Test Report & Coverage
+    needs: [backend, frontend, integration]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # 아티팩트 개별 다운로드 (디렉터리 구조 보존)
       - uses: actions/download-artifact@v8
         with:
-          path: test-results
-          merge-multiple: true
+          name: backend-test-results
+          path: dl/test-results
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-test-results
+          path: dl/test-results
+      - uses: actions/download-artifact@v8
+        if: always()
+        continue-on-error: true
+        with:
+          name: integration-test-results
+          path: dl/test-results
+      - uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage
+          path: dl/coverage/backend
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-coverage
+          path: dl/coverage/frontend
+
+      - name: List downloaded artifacts
+        if: always()
+        run: find dl/ -type f | head -30
 
       - name: Publish Test Report
-        uses: dorny/test-reporter@v3
+        if: always()
+        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
         with:
           name: Test Results
-          path: 'test-results/*.xml'
+          path: 'dl/test-results/*.xml'
           reporter: java-junit
+
+      - name: Generate coverage summary
+        if: always()
+        run: |
+          echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # ── Backend coverage ──
+          if [ -f dl/coverage/backend/coverage.json ]; then
+            echo "### Backend (pytest-cov)" >> $GITHUB_STEP_SUMMARY
+            python3 - <<'PYEOF' >> $GITHUB_STEP_SUMMARY
+          import json
+          with open("dl/coverage/backend/coverage.json") as f:
+              data = json.load(f)
+          totals = data.get("totals", {})
+          pct = totals.get("percent_covered_display", "N/A")
+          stmts = totals.get("num_statements", 0)
+          miss = totals.get("missing_lines", 0)
+          covered = totals.get("covered_lines", 0)
+          print(f"| Metric | Value |")
+          print(f"|--------|-------|")
+          print(f"| **Coverage** | **{pct}%** |")
+          print(f"| Statements | {stmts} |")
+          print(f"| Covered | {covered} |")
+          print(f"| Missed | {miss} |")
+          print()
+          PYEOF
+          else
+            echo "### Backend" >> $GITHUB_STEP_SUMMARY
+            echo "_Coverage data not available_" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ── Frontend coverage ──
+          if [ -f dl/coverage/frontend/coverage-summary.json ]; then
+            echo "### Frontend (vitest/v8)" >> $GITHUB_STEP_SUMMARY
+            python3 - <<'PYEOF' >> $GITHUB_STEP_SUMMARY
+          import json
+          with open("dl/coverage/frontend/coverage-summary.json") as f:
+              data = json.load(f)
+          total = data.get("total", {})
+          lines = total.get("lines", {})
+          branches = total.get("branches", {})
+          funcs = total.get("functions", {})
+          stmts = total.get("statements", {})
+          print(f"| Metric | Coverage |")
+          print(f"|--------|----------|")
+          print(f"| **Lines** | **{lines.get('pct', 'N/A')}%** |")
+          print(f"| Statements | {stmts.get('pct', 'N/A')}% |")
+          print(f"| Branches | {branches.get('pct', 'N/A')}% |")
+          print(f"| Functions | {funcs.get('pct', 'N/A')}% |")
+          print()
+          PYEOF
+          else
+            echo "### Frontend" >> $GITHUB_STEP_SUMMARY
+            echo "_Coverage data not available_" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Comment coverage on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '## 📊 Test Coverage Report\n\n';
+
+            // Backend
+            try {
+              const raw = fs.readFileSync('dl/coverage/backend/coverage.json', 'utf8');
+              const data = JSON.parse(raw);
+              const t = data.totals || {};
+              body += `### Backend (pytest-cov)\n`;
+              body += `| Metric | Value |\n|--------|-------|\n`;
+              body += `| **Coverage** | **${t.percent_covered_display || 'N/A'}%** |\n`;
+              body += `| Statements | ${t.num_statements || 0} |\n`;
+              body += `| Covered | ${t.covered_lines || 0} |\n`;
+              body += `| Missed | ${t.missing_lines || 0} |\n\n`;
+            } catch { body += '### Backend\n_Coverage data not available_\n\n'; }
+
+            // Frontend
+            try {
+              const raw = fs.readFileSync('dl/coverage/frontend/coverage-summary.json', 'utf8');
+              const data = JSON.parse(raw);
+              const t = data.total || {};
+              body += `### Frontend (vitest/v8)\n`;
+              body += `| Metric | Coverage |\n|--------|----------|\n`;
+              body += `| **Lines** | **${t.lines?.pct ?? 'N/A'}%** |\n`;
+              body += `| Statements | ${t.statements?.pct ?? 'N/A'}% |\n`;
+              body += `| Branches | ${t.branches?.pct ?? 'N/A'}% |\n`;
+              body += `| Functions | ${t.functions?.pct ?? 'N/A'}% |\n\n`;
+            } catch { body += '### Frontend\n_Coverage data not available_\n\n'; }
+
+            body += '_Generated by CI_';
+
+            // Find and update existing comment or create new
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes('📊 Test Coverage Report'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

@@ -2,11 +2,10 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { setAdminAuthenticated } from '../auth'
+import { adminLogin } from '../api'
 import {
   Box, TextField, Button, Typography, Paper
 } from '@mui/material'
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
 export default function AdminLogin() {
   const navigate = useNavigate()
@@ -19,24 +18,13 @@ export default function AdminLogin() {
     setError('')  // 초기화
 
     try {
-      const res = await fetch(`${BASE_URL}/auth/admin_login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      })
-      if (!res.ok) {
-        // 로그인 실패 (401 등)
-        const data = await res.json()
-        setError(data.error || 'Login failed')
-        return
-      }
-
+      await adminLogin(username, password)
       // 성공(200)
       setAdminAuthenticated(true) // localStorage 저장
       navigate('/admin/users')    // 이동
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      setError('Network error or server not responding')
+      setError(err.message || 'Network error or server not responding')
     }
   }
 

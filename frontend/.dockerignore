@@ -1,0 +1,11 @@
+.git
+.gitignore
+node_modules
+dist
+.vite
+.env
+.env.*
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+.claude/

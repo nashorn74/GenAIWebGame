@@ -44,6 +44,8 @@ services:
       - EVENTLET_NO_GREENDNS=yes
       - SECRET_KEY=${SECRET_KEY:-dev-fallback-key}
       - FLASK_DEBUG=true
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-devpass123}  # DEV ONLY — override in .env for prod
     depends_on:
       db:
         condition: service_healthy
