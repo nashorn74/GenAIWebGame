@@ -13,11 +13,12 @@ TOTAL=0
 assert_status() {
   local desc="$1" method="$2" url="$3" expect="$4"
   shift 4
-  local status body
+  local status body tmpfile
   TOTAL=$((TOTAL + 1))
-  body=$(curl -sf -X "$method" -H "Content-Type: application/json" "$@" "$url" -w "\n%{http_code}" 2>/dev/null || curl -s -X "$method" -H "Content-Type: application/json" "$@" "$url" -w "\n%{http_code}")
-  status=$(echo "$body" | tail -1)
-  body=$(echo "$body" | sed '$d')
+  tmpfile=$(mktemp)
+  status=$(curl -s -o "$tmpfile" -w "%{http_code}" -X "$method" -H "Content-Type: application/json" "$@" "$url" 2>/dev/null || echo "000")
+  body=$(cat "$tmpfile")
+  rm -f "$tmpfile"
   if [ "$status" = "$expect" ]; then
     echo "  ✅ $desc — HTTP $status"
     PASS=$((PASS + 1))
@@ -33,7 +34,7 @@ assert_status() {
 json_field() {
   # 간단한 JSON 필드 추출 (jq 없는 환경 대비)
   local field="$1"
-  echo "$LAST_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)$field)"
+  echo "$LAST_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)$field)" 2>/dev/null || echo "PARSE_ERROR"
 }
 
 echo "=== Integration Tests — User Flow ==="
@@ -91,7 +92,7 @@ echo "     → hp=$CHAR_HP/$CHAR_MAX_HP gold=$CHAR_GOLD"
 
 assert_status "PUT /api/characters/:id (rename) → 200" \
   PUT "$BASE/api/characters/$CHAR_ID" "200" \
-  -d '{"name":"IntHeroRenamed"}'
+  -d '{"name":"IntHeroNew"}'
 
 CHAR_NAME=$(json_field "['character']['name']")
 echo "     → renamed to $CHAR_NAME"
