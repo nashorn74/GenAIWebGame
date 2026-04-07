@@ -146,16 +146,40 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # 아티팩트 개별 다운로드 (디렉터리 구조 보존)
       - uses: actions/download-artifact@v8
         with:
-          path: artifacts
-          merge-multiple: true
+          name: backend-test-results
+          path: dl/test-results
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-test-results
+          path: dl/test-results
+      - uses: actions/download-artifact@v8
+        if: always()
+        continue-on-error: true
+        with:
+          name: integration-test-results
+          path: dl/test-results
+      - uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage
+          path: dl/coverage/backend
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-coverage
+          path: dl/coverage/frontend
+
+      - name: List downloaded artifacts
+        if: always()
+        run: find dl/ -type f | head -30
 
       - name: Publish Test Report
+        if: always()
         uses: dorny/test-reporter@v3
         with:
           name: Test Results
-          path: 'artifacts/test-results/*.xml'
+          path: 'dl/test-results/*.xml'
           reporter: java-junit
 
       - name: Generate coverage summary
@@ -165,11 +189,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # ── Backend coverage ──
-          if [ -f artifacts/coverage/backend/coverage.json ]; then
+          if [ -f dl/coverage/backend/coverage.json ]; then
             echo "### Backend (pytest-cov)" >> $GITHUB_STEP_SUMMARY
             python3 - <<'PYEOF' >> $GITHUB_STEP_SUMMARY
-          import json, sys
-          with open("artifacts/coverage/backend/coverage.json") as f:
+          import json
+          with open("dl/coverage/backend/coverage.json") as f:
               data = json.load(f)
           totals = data.get("totals", {})
           pct = totals.get("percent_covered_display", "N/A")
@@ -191,11 +215,11 @@ jobs:
           fi
 
           # ── Frontend coverage ──
-          if [ -f artifacts/coverage/frontend/coverage-summary.json ]; then
+          if [ -f dl/coverage/frontend/coverage-summary.json ]; then
             echo "### Frontend (vitest/v8)" >> $GITHUB_STEP_SUMMARY
             python3 - <<'PYEOF' >> $GITHUB_STEP_SUMMARY
           import json
-          with open("artifacts/coverage/frontend/coverage-summary.json") as f:
+          with open("dl/coverage/frontend/coverage-summary.json") as f:
               data = json.load(f)
           total = data.get("total", {})
           lines = total.get("lines", {})
@@ -226,7 +250,7 @@ jobs:
 
             // Backend
             try {
-              const raw = fs.readFileSync('artifacts/coverage/backend/coverage.json', 'utf8');
+              const raw = fs.readFileSync('dl/coverage/backend/coverage.json', 'utf8');
               const data = JSON.parse(raw);
               const t = data.totals || {};
               body += `### Backend (pytest-cov)\n`;
@@ -239,7 +263,7 @@ jobs:
 
             // Frontend
             try {
-              const raw = fs.readFileSync('artifacts/coverage/frontend/coverage-summary.json', 'utf8');
+              const raw = fs.readFileSync('dl/coverage/frontend/coverage-summary.json', 'utf8');
               const data = JSON.parse(raw);
               const t = data.total || {};
               body += `### Frontend (vitest/v8)\n`;
