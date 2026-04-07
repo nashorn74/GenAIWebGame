@@ -7,8 +7,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Checkbox, FormControlLabel, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material'
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+import { fetchNPCs as apiFetchNPCs, createNPC as apiCreateNPC, updateNPC as apiUpdateNPC, deleteNPC as apiDeleteNPC } from '../api'
 
 interface NPCData {
   id: number
@@ -42,8 +41,7 @@ export default function AdminNPCs() {
 
   const loadNPCs = async () => {
     try {
-      const res = await fetch(`${BASE_URL}/api/npcs`)
-      const data = await res.json()
+      const data = await apiFetchNPCs()
       setNpcs(data)
     } catch (err) {
       console.error('Failed to load NPCs', err)
@@ -120,52 +118,27 @@ export default function AdminNPCs() {
 
     try {
       if (isEditing && selectedNPC) {
-        const res = await fetch(`${BASE_URL}/api/npcs/${selectedNPC.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        })
-        if (res.ok) {
-          alert('NPC updated')
-          loadNPCs()
-          handleCloseDialog()
-        } else {
-          const err = await res.json()
-          alert(err.error || 'Failed to update NPC')
-        }
+        await apiUpdateNPC(selectedNPC.id, payload)
+        alert('NPC updated')
       } else {
-        const res = await fetch(`${BASE_URL}/api/npcs`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        })
-        if (res.ok) {
-          alert('NPC created')
-          loadNPCs()
-          handleCloseDialog()
-        } else {
-          const err = await res.json()
-          alert(err.error || 'Failed to create NPC')
-        }
+        await apiCreateNPC(payload)
+        alert('NPC created')
       }
-    } catch (err) {
-      alert('Network error')
+      loadNPCs()
+      handleCloseDialog()
+    } catch (err: any) {
+      alert(err.message || 'Network error')
     }
   }
 
   const handleDelete = async (npc: NPCData) => {
     if (!window.confirm(`Really delete NPC "${npc.name}"?`)) return
     try {
-      const res = await fetch(`${BASE_URL}/api/npcs/${npc.id}`, { method: 'DELETE' })
-      if (res.ok) {
-        alert('NPC deleted')
-        loadNPCs()
-      } else {
-        const err = await res.json()
-        alert(err.error || 'Failed to delete NPC')
-      }
-    } catch (err) {
-      alert('Network error')
+      await apiDeleteNPC(npc.id)
+      alert('NPC deleted')
+      loadNPCs()
+    } catch (err: any) {
+      alert(err.message || 'Network error')
     }
   }
 

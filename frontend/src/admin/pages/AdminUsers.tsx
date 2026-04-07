@@ -5,9 +5,7 @@ import {
   Paper, TableContainer, Typography, TextField, Button,
   Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material'
-
-// 환경변수에서 API base URL
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+import { fetchUsers as apiFetchUsers, fetchUserDetail as apiFetchUserDetail, banUser as apiBanUser, deleteUser as apiDeleteUser } from '../api'
 
 interface UserData {
   id: number
@@ -56,14 +54,9 @@ export default function AdminUsers() {
 
   // 초기 로드: 전체 유저 목록 불러오기
   useEffect(() => {
-    fetch(`${BASE_URL}/api/users`)
-      .then(res => res.json())
-      .then(data => {
-        setUsers(data)
-      })
-      .catch(err => {
-        console.error('Error fetching users:', err)
-      })
+    apiFetchUsers()
+      .then(data => setUsers(data))
+      .catch(err => console.error('Error fetching users:', err))
   }, [])
 
   // 간단한 클라이언트 검색(필터)
@@ -86,31 +79,11 @@ export default function AdminUsers() {
     setOpenDetail(true)
 
     try {
-      // 1) 유저 정보
-      const userRes = await fetch(`${BASE_URL}/api/users/${user.id}`)
-      if (!userRes.ok) {
-        if (userRes.status === 404) {
-          setDetailError('User detail not found.')
-        } else {
-          setDetailError('Failed to load user detail.')
-        }
-        return
-      }
-      const userJson = await userRes.json()
-
-      // 2) 캐릭터 목록
-      const charsRes = await fetch(`${BASE_URL}/api/characters?user_id=${user.id}`)
-      if (!charsRes.ok) {
-        setDetailError('Failed to load characters.')
-        return
-      }
-      const charsJson = await charsRes.json()
-
-      // 통합해서 저장
-      setUserDetails({ user: userJson, characters: charsJson })
-    } catch (err) {
+      const details = await apiFetchUserDetail(user.id)
+      setUserDetails(details)
+    } catch (err: any) {
       console.error(err)
-      setDetailError('Network error while fetching user detail.')
+      setDetailError(err.message || 'Network error while fetching user detail.')
     }
   }
 
@@ -125,20 +98,11 @@ export default function AdminUsers() {
   const handleBan = async (user: UserData) => {
     if (!window.confirm(`Really ban user "${user.username}" ?`)) return
     try {
-      const res = await fetch(`${BASE_URL}/api/users/${user.id}/ban`, {
-        method: 'POST',
-      })
-      if (res.ok) {
-        const result = await res.json()
-        alert(result.message)
-        // 로컬 state 갱신
-        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, status: 'banned' } : u))
-      } else {
-        const errData = await res.json()
-        alert(errData.error || 'Failed to ban user')
-      }
-    } catch (err) {
-      alert('Network error while banning user.')
+      const result = await apiBanUser(user.id)
+      alert(result.message)
+      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, status: 'banned' } : u))
+    } catch (err: any) {
+      alert(err.message || 'Network error while banning user.')
     }
   }
 
@@ -146,16 +110,11 @@ export default function AdminUsers() {
   const handleDelete = async (user: UserData) => {
     if (!window.confirm(`Really delete user "${user.username}" ?`)) return
     try {
-      const res = await fetch(`${BASE_URL}/api/users/${user.id}`, { method: 'DELETE' })
-      if (res.ok) {
-        alert('User deleted')
-        // 목록에서 제거
-        setUsers(prev => prev.filter(u => u.id !== user.id))
-      } else {
-        alert('Failed to delete user')
-      }
-    } catch (err) {
-      alert('Network error while deleting user.')
+      await apiDeleteUser(user.id)
+      alert('User deleted')
+      setUsers(prev => prev.filter(u => u.id !== user.id))
+    } catch (err: any) {
+      alert(err.message || 'Network error while deleting user.')
     }
   }
 
