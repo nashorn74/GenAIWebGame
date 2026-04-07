@@ -13,6 +13,7 @@ from items import items_bp
 from shop import shop_bp
 from maps import maps_bp
 from monsters import monsters_bp
+from auth_admin import admin_auth_bp
 
 
 @pytest.fixture()
@@ -36,6 +37,7 @@ def app():
     app.register_blueprint(shop_bp, url_prefix="/api")
     app.register_blueprint(maps_bp, url_prefix="/api")
     app.register_blueprint(monsters_bp, url_prefix="/api")
+    app.register_blueprint(admin_auth_bp, url_prefix="/auth")
 
     with app.app_context():
         db.create_all()
