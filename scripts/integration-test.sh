@@ -217,6 +217,8 @@ assert_status "POST /api/items/use (potion) → 200" \
 HEALED=$(json_field "['healed']")
 AFTER_HP=$(json_field "['hp']")
 echo "     → healed=$HEALED, hp=$AFTER_HP"
+assert_value "healed by potion (30)" "$HEALED" "30"
+assert_value "hp after use (50+30=80)" "$AFTER_HP" "80"
 
 # ──────────────────────────────────────────
 echo ""

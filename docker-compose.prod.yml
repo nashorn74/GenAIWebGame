@@ -47,7 +47,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - ADMIN_USERNAME=${ADMIN_USERNAME}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}  # ⚠️ PRODUCTION: 반드시 .env에 구체적 도메인 설정 (예: https://your-domain.com)
     depends_on:
       db:
         condition: service_healthy
