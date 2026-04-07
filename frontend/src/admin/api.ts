@@ -20,6 +20,7 @@ export async function adminLogin(username: string, password: string) {
 
 export async function fetchUsers() {
   const res = await fetch(`${BASE_URL}/api/users`)
+  if (!res.ok) throw new Error('Failed to fetch users')
   return res.json()
 }
 
@@ -55,6 +56,7 @@ export async function deleteUser(id: number) {
 
 export async function fetchCharacters() {
   const res = await fetch(`${BASE_URL}/api/characters`)
+  if (!res.ok) throw new Error('Failed to fetch characters')
   return res.json()
 }
 
@@ -88,8 +90,9 @@ export async function deleteCharacter(id: number) {
 
 export async function fetchItems(category?: string) {
   let url = `${BASE_URL}/api/items`
-  if (category) url += `?category=${category}`
+  if (category) url += `?category=${encodeURIComponent(category)}`
   const res = await fetch(url)
+  if (!res.ok) throw new Error('Failed to fetch items')
   return res.json()
 }
 
@@ -131,6 +134,7 @@ export async function deleteItem(id: number) {
 
 export async function fetchMaps() {
   const res = await fetch(`${BASE_URL}/api/maps`)
+  if (!res.ok) throw new Error('Failed to fetch maps')
   return res.json()
 }
 
@@ -172,6 +176,7 @@ export async function deleteMap(key: string) {
 
 export async function fetchNPCs() {
   const res = await fetch(`${BASE_URL}/api/npcs`)
+  if (!res.ok) throw new Error('Failed to fetch NPCs')
   return res.json()
 }
 

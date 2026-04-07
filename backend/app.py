@@ -115,7 +115,7 @@ def create_app():
     db.init_app(app)
 
     cors_origins = os.environ.get("CORS_ORIGINS", "*")
-    allowed_origins = cors_origins if cors_origins == "*" else cors_origins.split(",")
+    allowed_origins = cors_origins if cors_origins == "*" else [o.strip() for o in cors_origins.split(",")]
 
     socketio = SocketIO(app,
                         cors_allowed_origins=allowed_origins,

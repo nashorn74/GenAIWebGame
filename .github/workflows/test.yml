@@ -176,7 +176,7 @@ jobs:
 
       - name: Publish Test Report
         if: always()
-        uses: dorny/test-reporter@v3
+        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
         with:
           name: Test Results
           path: 'dl/test-results/*.xml'
