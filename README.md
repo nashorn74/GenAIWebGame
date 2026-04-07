@@ -334,7 +334,7 @@ ghcr.io/nashorn74/genaiwebgame-frontend:<commit-sha>
 
 main 브랜치에 다음 보호 규칙이 설정되어 있습니다:
 
-- PR을 통해서만 머지 가능 (직접 push 차단)
+- PR을 통해서만 머지 가능 (관리자 제외 직접 push 차단)
 - CI Status Check 필수 (Backend Tests, Frontend Tests, Integration Tests 모두 통과)
 - Force push 차단
 - 브랜치 삭제 차단
@@ -395,15 +395,34 @@ main 브랜치에 다음 보호 규칙이 설정되어 있습니다:
 | POST | `/api/shops/:npc_id/buy` | 아이템 구매 |
 | POST | `/api/shops/:npc_id/sell` | 아이템 판매 |
 
-### 맵 / NPC / 유저
+### 맵
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/maps` | 맵 목록 |
 | GET | `/api/maps/:key` | 맵 상세 (타일맵 레이어 포함) |
+| POST | `/api/maps` | 맵 생성 |
+| PUT | `/api/maps/:key` | 맵 수정 |
+| DELETE | `/api/maps/:key` | 맵 삭제 |
+
+### NPC
+| Method | Path | 설명 |
+|--------|------|------|
 | GET | `/api/npcs` | NPC 목록 |
+| GET | `/api/npcs/:id` | NPC 상세 |
+| POST | `/api/npcs` | NPC 생성 |
+| PUT | `/api/npcs/:id` | NPC 수정 |
+| DELETE | `/api/npcs/:id` | NPC 삭제 |
 | GET | `/api/npcs/:id/dialog` | NPC 대화 |
+
+### 유저
+| Method | Path | 설명 |
+|--------|------|------|
 | GET | `/api/users` | 유저 목록 |
+| GET | `/api/users/:id` | 유저 상세 |
+| PUT | `/api/users/:id` | 유저 수정 |
 | DELETE | `/api/users/:id` | 유저 삭제 |
+| POST | `/api/users/:id/ban` | 유저 밴 |
+| POST | `/api/users/:id/unban` | 유저 언밴 |
 
 ---
 
