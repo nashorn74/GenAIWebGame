@@ -205,6 +205,11 @@ echo "     → npc name=$NPC_NAME"
 echo ""
 echo "── 8. 정리 (Cleanup) ──"
 
+# 캐릭터에 남은 아이템 판매 (FK constraint 방지: 구매3 - 판매1 - 사용1 = 1개 남음)
+assert_status "POST /api/shops/:npc/sell (cleanup remaining) → 200" \
+  POST "$BASE/api/shops/$NPC_ID/sell" "200" \
+  -d "{\"character_id\":$CHAR_ID,\"item_id\":$POTION_ID,\"quantity\":1}"
+
 assert_status "DELETE /api/characters/:id → 200" \
   DELETE "$BASE/api/characters/$CHAR_ID" "200"
 
