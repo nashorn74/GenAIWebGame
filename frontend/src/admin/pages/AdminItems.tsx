@@ -31,18 +31,19 @@ export default function AdminItems() {
   const [selectedItem, setSelectedItem] = useState<ItemData | null>(null)
   const [formData, setFormData] = useState<Partial<ItemData>>({})
 
-  useEffect(() => {
-    loadItems()
-  }, [])
-
-  const loadItems = async () => {
+  const loadItems = async (category?: string) => {
     try {
-      const data = await apiFetchItems(categoryFilter || undefined)
+      const data = await apiFetchItems(category || undefined)
       setItems(data)
     } catch (err) {
       console.error('Failed to load items', err)
     }
   }
+
+  // categoryFilter가 변경될 때마다 서버에서 다시 로드
+  useEffect(() => {
+    loadItems(categoryFilter)
+  }, [categoryFilter])
 
   // 간단한 클라이언트 검색
   const filteredItems = items.filter(it => {
@@ -58,10 +59,7 @@ export default function AdminItems() {
 
   const handleFilterChange = (cat: string) => {
     setCategoryFilter(cat)
-    // 필터 바뀌면 다시 loadItems() 해서 서버쪽에서 category=cat 쿼리
-    setTimeout(() => {
-      loadItems()
-    }, 0)
+    // useEffect([categoryFilter])가 자동으로 loadItems() 호출
   }
 
   const handleOpenCreate = () => {
@@ -123,7 +121,7 @@ export default function AdminItems() {
         await apiCreateItem(payload)
         alert('Item created')
       }
-      loadItems()
+      loadItems(categoryFilter)
       handleCloseDialog()
     } catch (err: any) {
       alert(err.message || 'Network error')
@@ -135,7 +133,7 @@ export default function AdminItems() {
     try {
       await apiDeleteItem(item.id)
       alert('Item deleted')
-      loadItems()
+      loadItems(categoryFilter)
     } catch (err: any) {
       alert(err.message || 'Network error')
     }

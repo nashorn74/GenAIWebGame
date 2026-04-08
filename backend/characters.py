@@ -49,7 +49,7 @@ def create_character():
     hair_color = data.get('hair_color', 'blonde').lower()  # 디폴트: 금발
 
     # 1) 유저 존재 여부 확인
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify({'error': 'Invalid user_id'}), 400
 

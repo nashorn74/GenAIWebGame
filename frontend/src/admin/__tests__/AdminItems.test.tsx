@@ -18,6 +18,7 @@ const mockItems = [
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.fetchItems).mockResolvedValue(mockItems)
+  vi.spyOn(window, 'alert').mockImplementation(() => {})
 })
 
 describe('AdminItems', () => {
@@ -80,6 +81,40 @@ describe('AdminItems', () => {
 
     await waitFor(() => {
       expect(api.deleteItem).toHaveBeenCalledWith(1)
+    })
+  })
+
+  it('reloads items with category filter when category changes', async () => {
+    const potionOnly = [mockItems[0]]
+    vi.mocked(api.fetchItems)
+      .mockResolvedValueOnce(mockItems)     // initial load (no filter)
+      .mockResolvedValueOnce(potionOnly)    // after selecting "potion"
+
+    const user = userEvent.setup()
+    render(<AdminItems />)
+    await waitFor(() => {
+      expect(screen.getByText('Iron Sword')).toBeInTheDocument()
+    })
+
+    // 첫 로드: 필터 없이 호출
+    expect(api.fetchItems).toHaveBeenCalledWith(undefined)
+
+    // Category 드롭다운에서 "potion" 선택
+    // MUI Select는 jsdom에서 label 연결이 불안정하므로 role만으로 선택
+    const categorySelect = screen.getByRole('combobox')
+    await user.click(categorySelect)
+    const potionOption = await screen.findByRole('option', { name: 'potion' })
+    await user.click(potionOption)
+
+    // useEffect([categoryFilter])에 의해 "potion" 필터로 재요청
+    await waitFor(() => {
+      expect(api.fetchItems).toHaveBeenCalledWith('potion')
+    })
+
+    // 결과에 potion만 표시
+    await waitFor(() => {
+      expect(screen.getByText('Health Potion')).toBeInTheDocument()
+      expect(screen.queryByText('Iron Sword')).not.toBeInTheDocument()
     })
   })
 })

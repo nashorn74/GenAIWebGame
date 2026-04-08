@@ -1,16 +1,29 @@
-# auth_admin.py (또는 기존 auth.py 안에 추가 가능)
+# auth_admin.py — 관리자 인증 + admin_required 데코레이터
 import os
-from flask import Blueprint, request, jsonify
+from functools import wraps
+from flask import Blueprint, request, jsonify, session
 
 admin_auth_bp = Blueprint('admin_auth', __name__)
 
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
+
+def admin_required(f):
+    """관리자 세션 인증 데코레이터 — 미인증 시 401 반환"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('is_admin'):
+            return jsonify({'error': 'Admin authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
 @admin_auth_bp.route('/admin_login', methods=['POST'])
 def admin_login():
     """
     관리자 전용 로그인 (환경변수 ADMIN_USERNAME / ADMIN_PASSWORD 사용)
+    세션에 is_admin=True 설정
     """
     if not ADMIN_PASSWORD:
         return jsonify({'error': 'Admin account not configured'}), 503
@@ -23,10 +36,16 @@ def admin_login():
     if username != ADMIN_USERNAME or password != ADMIN_PASSWORD:
         return jsonify({'error': 'Invalid admin credentials'}), 401
 
-    # 관리자 인증 성공
-    # 여기서 세션/토큰 발행 로직을 구현할 수 있음
-    # 아래는 단순 메시지:
+    # 관리자 인증 성공 — 세션에 기록
+    session['is_admin'] = True
     return jsonify({
         'message': 'Admin login successful',
         'admin': True
     }), 200
+
+
+@admin_auth_bp.route('/admin_logout', methods=['POST'])
+def admin_logout():
+    """관리자 로그아웃 — 세션 정리"""
+    session.pop('is_admin', None)
+    return jsonify({'message': 'Admin logged out'}), 200

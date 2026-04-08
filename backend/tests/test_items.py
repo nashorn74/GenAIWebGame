@@ -44,8 +44,8 @@ def _set_hp(app, char_id, hp):
         db.session.commit()
 
 
-def test_create_item(client):
-    resp = client.post("/api/items", json={
+def test_create_item(admin_client):
+    resp = admin_client.post("/api/items", json={
         "name": "Iron Sword", "category": "weapon",
         "attack_power": 10, "buy_price": 50,
     })
@@ -53,54 +53,78 @@ def test_create_item(client):
     assert resp.get_json()["item"]["name"] == "Iron Sword"
 
 
-def test_list_items(client):
-    client.post("/api/items", json={"name": "Sword", "category": "weapon"})
-    client.post("/api/items", json={"name": "Potion", "category": "potion"})
-    resp = client.get("/api/items")
+def test_list_items(admin_client):
+    admin_client.post("/api/items", json={"name": "Sword", "category": "weapon"})
+    admin_client.post("/api/items", json={"name": "Potion", "category": "potion"})
+    resp = admin_client.get("/api/items")
     assert resp.status_code == 200
     assert len(resp.get_json()) == 2
 
 
-def test_list_items_filter_category(client):
-    client.post("/api/items", json={"name": "Sword2", "category": "weapon"})
-    client.post("/api/items", json={"name": "Potion2", "category": "potion"})
-    resp = client.get("/api/items?category=weapon")
+def test_list_items_filter_category(admin_client):
+    admin_client.post("/api/items", json={"name": "Sword2", "category": "weapon"})
+    admin_client.post("/api/items", json={"name": "Potion2", "category": "potion"})
+    resp = admin_client.get("/api/items?category=weapon")
     data = resp.get_json()
     assert all(i["category"] == "weapon" for i in data)
 
 
-def test_get_item(client):
-    iid = client.post("/api/items", json={
+def test_get_item(admin_client):
+    iid = admin_client.post("/api/items", json={
         "name": "GetItem", "category": "drop",
     }).get_json()["item"]["id"]
-    resp = client.get(f"/api/items/{iid}")
+    resp = admin_client.get(f"/api/items/{iid}")
     assert resp.status_code == 200
     assert resp.get_json()["name"] == "GetItem"
 
 
-def test_update_item(client):
-    iid = client.post("/api/items", json={
+def test_update_item(admin_client):
+    iid = admin_client.post("/api/items", json={
         "name": "OldName", "category": "drop",
     }).get_json()["item"]["id"]
-    resp = client.put(f"/api/items/{iid}", json={"name": "NewName"})
+    resp = admin_client.put(f"/api/items/{iid}", json={"name": "NewName"})
     assert resp.status_code == 200
     assert resp.get_json()["item"]["name"] == "NewName"
 
 
-def test_delete_item(client):
-    iid = client.post("/api/items", json={
+def test_delete_item(admin_client):
+    iid = admin_client.post("/api/items", json={
         "name": "DelItem", "category": "drop",
     }).get_json()["item"]["id"]
-    resp = client.delete(f"/api/items/{iid}")
+    resp = admin_client.delete(f"/api/items/{iid}")
     assert resp.status_code == 200
-    resp = client.get(f"/api/items/{iid}")
+    resp = admin_client.get(f"/api/items/{iid}")
     assert resp.status_code == 404
 
 
-def test_create_item_missing_name(client):
-    resp = client.post("/api/items", json={"category": "drop"})
+def test_create_item_missing_name(admin_client):
+    resp = admin_client.post("/api/items", json={"category": "drop"})
     assert resp.status_code == 400
     assert "name" in resp.get_json()["error"].lower()
+
+
+def test_create_item_requires_admin(client):
+    """미인증 요청은 401 반환"""
+    resp = client.post("/api/items", json={"name": "Hack", "category": "weapon"})
+    assert resp.status_code == 401
+
+
+def test_update_item_requires_admin(client, admin_client):
+    """미인증 수정 요청은 401 반환"""
+    iid = admin_client.post("/api/items", json={
+        "name": "UpdAuth", "category": "drop",
+    }).get_json()["item"]["id"]
+    resp = client.put(f"/api/items/{iid}", json={"name": "Hacked"})
+    assert resp.status_code == 401
+
+
+def test_delete_item_requires_admin(client, admin_client):
+    """미인증 삭제 요청은 401 반환"""
+    iid = admin_client.post("/api/items", json={
+        "name": "DelAuth", "category": "drop",
+    }).get_json()["item"]["id"]
+    resp = client.delete(f"/api/items/{iid}")
+    assert resp.status_code == 401
 
 
 # ── use_item tests ──

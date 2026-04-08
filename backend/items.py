@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from models import db, Item, Character, CharacterItem
+from auth_admin import admin_required
 
 items_bp = Blueprint('items', __name__)
 
@@ -22,6 +23,7 @@ def get_item(item_id):
     return jsonify(item.to_dict())
 
 @items_bp.route('/items', methods=['POST'])
+@admin_required
 def create_item():
     data = request.get_json() or {}
     name = data.get('name')
@@ -44,6 +46,7 @@ def create_item():
     return jsonify({'message': 'Item created', 'item': item.to_dict()}), 201
 
 @items_bp.route('/items/<int:item_id>', methods=['PUT'])
+@admin_required
 def update_item(item_id):
     item = Item.query.get_or_404(item_id)
     data = request.get_json() or {}
@@ -61,6 +64,7 @@ def update_item(item_id):
     return jsonify({'message': 'Item updated', 'item': item.to_dict()})
 
 @items_bp.route('/items/<int:item_id>', methods=['DELETE'])
+@admin_required
 def delete_item(item_id):
     item = Item.query.get_or_404(item_id)
     db.session.delete(item)

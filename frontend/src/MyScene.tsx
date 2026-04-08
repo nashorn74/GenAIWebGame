@@ -167,7 +167,8 @@ export class MyScene extends Phaser.Scene {
     })
 
     /* ── ① socket 연결 ── */
-    this.socket = io(import.meta.env.VITE_API_BASE_URL);
+    const socketUrl = import.meta.env.VITE_API_BASE_URL || ''
+    this.socket = io(socketUrl || undefined);  // 빈 문자열이면 undefined로 현재 origin 사용
 
     /* socket 연결 직후 – 디버그용 콘솔 */
 
@@ -175,7 +176,7 @@ export class MyScene extends Phaser.Scene {
     const myCharId = Number(sessionStorage.getItem('charId'));
 
     /* 1. URL 확인 */
-    console.log('SOCKET URL =', import.meta.env.VITE_API_BASE_URL)
+    console.log('SOCKET URL =', socketUrl || '(proxy — current origin)')
 
     /* 2. connect 실패 시 reason 출력 */
     this.socket.io.on('error',  (err)=>console.error('socket error', err))

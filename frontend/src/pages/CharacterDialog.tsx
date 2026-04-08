@@ -11,6 +11,8 @@ interface Props {
   onCancel():void
 }
 
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+
 export default function CharacterDialog({userId, char, onSaved, onCancel}:Props){
   const isEdit = !!char
   const [name , setName ] = useState(char?.name  || '')
@@ -23,7 +25,7 @@ export default function CharacterDialog({userId, char, onSaved, onCancel}:Props)
     setErr('')
     const payload = { name, job, gender, hair_color:hair, user_id:userId }
     try{
-      const url = import.meta.env.VITE_API_BASE_URL + '/api/characters' + (isEdit?`/${char.id}`:'')
+      const url = BASE_URL + '/api/characters' + (isEdit?`/${char.id}`:'')
       const res = await fetch(url,{
         method: isEdit?'PUT':'POST',
         headers:{'Content-Type':'application/json'},

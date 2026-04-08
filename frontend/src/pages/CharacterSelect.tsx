@@ -7,6 +7,8 @@ import {
 import { getUserId } from '../App'
 import CharacterDialog from './CharacterDialog'
 
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+
 interface Char {
   id:number, name:string, job:string, level:number
 }
@@ -33,8 +35,13 @@ export default function CharacterSelect() {
 
   /** 캐릭터 목록 불러오기 */
   const reload = () => {
-    fetch(`${import.meta.env.VITE_API_BASE_URL}/api/characters?user_id=${userId}`)
-      .then(r=>r.json()).then(setChars)
+    fetch(`${BASE_URL}/api/characters?user_id=${userId}`)
+      .then(r => {
+        if (!r.ok) throw new Error(`characters fetch failed: ${r.status}`)
+        return r.json()
+      })
+      .then(setChars)
+      .catch(e => console.error('[CharacterSelect] reload 실패:', e))
   }
   useEffect(reload, [userId])
 
@@ -84,7 +91,8 @@ export default function CharacterSelect() {
           <Button size="small" color="error"
             onClick={async ()=>{
               if(!confirm('Delete this character?')) return
-              await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/characters/${char.id}`,{method:'DELETE'})
+              const r = await fetch(`${BASE_URL}/api/characters/${char.id}`,{method:'DELETE'})
+              if(!r.ok) { alert('삭제 실패'); return }
               reload()
             }}>Delete</Button>
         </CardActions>

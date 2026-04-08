@@ -16,12 +16,14 @@ from maps import maps_bp
 from monsters import monsters_bp
 from sqlalchemy.orm import Session   # 타입 힌트용
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from utils.walkable import get_walkable, get_tilemap
 from random import choice, shuffle
 from typing import Any
-import os, redis
+import os
 import time
 import json
+import redis                     # ▸ pip install redis
 
 knockback_until: dict[int, float] = {}   # {monster_id: unix_timestamp}
 last_move_sent: dict[int, float] = {}   # {char_id: unix_ts}
@@ -29,8 +31,6 @@ last_move_sent: dict[int, float] = {}   # {char_id: unix_ts}
 # ---------------------------------------------
 # redis 연결
 # ---------------------------------------------
-import os, redis
-import redis                     # ▸ pip install redis
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 os.environ["EVENTLET_NO_GREENDNS"] = "yes" 
 
@@ -73,21 +73,20 @@ def update_sid_map(sid: str, map_key: str):
     r.hset(K_SID_TO_MAP, sid, map_key)
 
 def remove_sid(sid: str):
-    """disconnect 때 호출: hash 2 곳 모두 clean + char_id 반환"""
+    """disconnect 때 호출: hash 2 곳 모두 clean + char_id 반환 (없으면 None)"""
     pipe = r.pipeline()
-    char_id = None
     # sid -> map 해시에서 pop
     pipe.hget(K_SID_TO_MAP, sid)
     pipe.hdel(K_SID_TO_MAP, sid)
     # char_to_sid 해시에서 역-검색
-    char_id = r.hgetall(K_CHAR_TO_SID)        # 작은 해시라 OK
-    for cid, stored in char_id.items():
+    found_cid = None
+    for cid, stored in r.hgetall(K_CHAR_TO_SID).items():
         if stored == sid:
-            char_id = int(cid)
+            found_cid = int(cid)
             pipe.hdel(K_CHAR_TO_SID, cid)
             break
     pipe.execute()
-    return char_id
+    return found_cid
 # ---------------------------------------------
 
 from math import hypot
@@ -194,8 +193,9 @@ def create_app():
             socketio.sleep(2.0)
             try:
                 with app.app_context():
-                    # 모든 캐릭터 위치 미리 캐시(딕셔너리)
-                    chars = {c.id: c for c in Character.query.all()}
+                    # dungeon1 맵의 캐릭터만 로드 (전체 로드 방지)
+                    # TODO: 다른 맵에 몬스터가 추가되면 map_key를 동적으로 처리해야 함
+                    chars = {c.id: c for c in Character.query.filter_by(map_key='dungeon1').all()}
 
                     now  = time.time()
 
@@ -335,7 +335,7 @@ def create_app():
                                 print(resp_pkt)
                                 socketio.emit('player_respawn', resp_pkt, room=f'map_{prev_map}')
 
-                                target_sid = get_sid_by_char(target.id).decode();
+                                target_sid = get_sid_by_char(target.id)
                                 print(target_sid)
                                 if target_sid:
                                     # ① 이전 방 모든 플레이어에게 despawn (잔상 제거)
@@ -373,9 +373,11 @@ def create_app():
 
                     db.session.commit()
             except Exception:
+                app.logger.exception(
+                    "monster_ai 루프 예외 — 루프 계속 진행"
+                )
                 with app.app_context():        # 롤백도 컨텍스트 안에서
                     db.session.rollback()
-                raise
             finally:
                 with app.app_context():
                     db.session.remove()
@@ -473,11 +475,6 @@ def create_app():
             return
         # ───────────────────────
 
-        char: Character = db.session.get(Character, char_id)
-        if not char:
-            db.session.remove()
-            return
-
         # ── 0. 이동 전·후 좌표 계산 ───────────────────────────────
         prev_px, prev_py = (char.x or new_px), (char.y or new_py)
         char.map_key, char.x, char.y = new_map, new_px, new_py
@@ -567,7 +564,6 @@ def create_app():
             
             if mob.drop_item_id:                           # NULL 가드
                 # race-safe upsert: INSERT ON CONFLICT UPDATE
-                from sqlalchemy.dialects.postgresql import insert as pg_insert
                 stmt = pg_insert(CharacterItem).values(
                     character_id=char.id,
                     item_id=mob.drop_item_id,
@@ -612,18 +608,17 @@ def create_app():
             print("disconnect 중 오류 발생 - SID를 얻을 수 없음")
             return
         
-        # Redis 또는 데이터베이스에서 모든 키를 문자열로 처리하도록 조정
+        # 제거 전에 먼저 map_key를 조회하고, 그 다음 제거
         try:
+            map_key = get_map_by_sid(sid) or "unknown"
             char_id = remove_sid(sid)
             if char_id is None:
                 return
-                
-            # 모든 ID를 문자열로 안전하게 변환
-            safe_char_id = str(char_id.decode('utf-8') if isinstance(char_id, bytes) else char_id)
-            
-            map_key = get_map_by_sid(sid) or "unknown"
-            safe_map_key = str(map_key.decode('utf-8') if isinstance(map_key, bytes) else map_key)
-            
+
+            # decode_responses=True이므로 이미 문자열
+            safe_char_id = str(char_id)
+            safe_map_key = str(map_key)
+
             # 안전한 값으로 이벤트 발송
             room_name = f"map_{safe_map_key}"
             leave_room(room_name, sid=sid)
@@ -729,7 +724,7 @@ if __name__ == '__main__':
                 NPC(name='Garrett Leaf', gender='Male', race='Human', job='Traveling Merchant', map_key='city2',
                     x=10, y=11, dialog='안녕하세요! 물건을 구경해 보실래요?', npc_type='shop')
             ]
-            db.session.bulk_save_objects(seed_npcs)
+            db.session.add_all(seed_npcs)
             db.session.commit()
         
         # 2) 아이템 시드
@@ -769,7 +764,7 @@ if __name__ == '__main__':
                 Item(name='Scale Armor',      category='armor', description='방어력+15(비늘)',   buy_price=120, sell_price=0, defense_power=15),
                 Item(name='Mystic Robe',      category='armor', description='방어+5, 마법공+3',  buy_price=90, sell_price=0, defense_power=5, attack_power=3),
             ]
-            db.session.bulk_save_objects(seed_items)
+            db.session.add_all(seed_items)
             db.session.commit()
         
         # 3) Map 시드
@@ -846,7 +841,7 @@ if __name__ == '__main__':
                     }'''
                 )
             ]
-            db.session.bulk_save_objects(seed_maps)
+            db.session.add_all(seed_maps)
             db.session.commit()
         
         if Monster.query.count() == 0:

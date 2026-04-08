@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from models import db, User
+from auth_admin import admin_required
 
 bp = Blueprint('api', __name__)
 
@@ -34,8 +35,9 @@ def get_user(user_id):
     user = User.query.get_or_404(user_id)
     return jsonify(user.to_dict())
 
-# 유저 수정 (Update)
+# 유저 수정 (Update) — 관리자 전용
 @bp.route('/users/<int:user_id>', methods=['PUT'])
+@admin_required
 def update_user(user_id):
     user = User.query.get_or_404(user_id)
     data = request.get_json()
@@ -46,8 +48,9 @@ def update_user(user_id):
     db.session.commit()
     return jsonify({'message': 'User updated', 'user': user.to_dict()})
 
-# 유저 삭제 (Delete)
+# 유저 삭제 (Delete) — 관리자 전용
 @bp.route('/users/<int:user_id>', methods=['DELETE'])
+@admin_required
 def delete_user(user_id):
     user = User.query.get_or_404(user_id)
     db.session.delete(user)
@@ -55,6 +58,7 @@ def delete_user(user_id):
     return jsonify({'message': 'User deleted'})
 
 @bp.route('/users/<int:user_id>/ban', methods=['POST'])
+@admin_required
 def ban_user(user_id):
     """
     유저 정지: status='banned'
@@ -68,6 +72,7 @@ def ban_user(user_id):
     return jsonify({'message': f'User {user.username} is now banned', 'status': user.status}), 200
 
 @bp.route('/users/<int:user_id>/unban', methods=['POST'])
+@admin_required
 def unban_user(user_id):
     """
     유저 정지 해제: status='active'

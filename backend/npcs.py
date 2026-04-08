@@ -2,6 +2,7 @@
 
 from flask import Blueprint, request, jsonify
 from models import db, NPC
+from auth_admin import admin_required
 
 npcs_bp = Blueprint('npcs', __name__)
 
@@ -35,6 +36,7 @@ def get_npc(npc_id):
 
 # 3) NPC 생성 (관리자 용)
 @npcs_bp.route('/npcs', methods=['POST'])
+@admin_required
 def create_npc():
     """
     요청 JSON 예시:
@@ -74,6 +76,7 @@ def create_npc():
 
 # 4) NPC 수정 (관리자 용)
 @npcs_bp.route('/npcs/<int:npc_id>', methods=['PUT'])
+@admin_required
 def update_npc(npc_id):
     npc = NPC.query.get_or_404(npc_id)
     data = request.get_json() or {}
@@ -98,6 +101,7 @@ def update_npc(npc_id):
 
 # 5) NPC 삭제 (관리자 용)
 @npcs_bp.route('/npcs/<int:npc_id>', methods=['DELETE'])
+@admin_required
 def delete_npc(npc_id):
     npc = NPC.query.get_or_404(npc_id)
     db.session.delete(npc)

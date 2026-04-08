@@ -52,6 +52,15 @@ def client(app):
 
 
 @pytest.fixture()
+def admin_client(app):
+    """관리자 세션이 설정된 테스트 클라이언트."""
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['is_admin'] = True
+    return client
+
+
+@pytest.fixture()
 def session(app):
     """DB 세션 직접 사용이 필요한 모델 테스트용."""
     with app.app_context():
