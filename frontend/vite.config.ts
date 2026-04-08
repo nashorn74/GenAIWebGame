@@ -4,6 +4,14 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      // VITE_API_BASE_URL 미설정 시에도 /auth, /api 요청이 백엔드로 전달되도록 프록시
+      '/auth': 'http://localhost:5000',
+      '/api': 'http://localhost:5000',
+      '/socket.io': { target: 'http://localhost:5000', ws: true },
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,
