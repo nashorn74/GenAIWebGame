@@ -15,6 +15,8 @@ allowed-tools:
 
 ### 1. 백엔드 테스트 (pytest)
 
+> 전제조건: Python 3.11 환경 + `pip install -r requirements-dev.txt` 완료
+
 ```bash
 cd backend && python3 -m pytest -v --tb=short --cov --cov-report=term-missing
 ```

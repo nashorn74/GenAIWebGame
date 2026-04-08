@@ -36,7 +36,7 @@ frontend/src/
   ui/                 # InventoryDialog, ShopDialog, NpcDialog, MenuPopover
   admin/              # 관리자 대시보드 (api.ts + pages/)
   utils/              # API 유틸리티 (character, items, map, npc, sfx)
-  __tests__/          # 프론트엔드 테스트 (86%+ 커버리지)
+  __tests__/          # 프론트엔드 테스트 (85%+ 커버리지)
 
 scripts/
   smoke-test.sh       # 스모크 테스트 (엔드포인트 헬스체크)
@@ -46,10 +46,12 @@ scripts/
 ## 빌드 & 테스트 명령
 
 ```bash
-# 백엔드 테스트
+# 백엔드 테스트 (Python 3.11 권장, 의존성 설치 필요)
+cd backend && pip install -r requirements-dev.txt  # 최초 1회
 cd backend && python3 -m pytest -v --tb=short
 
 # 프론트엔드 테스트
+cd frontend && npm install  # 최초 1회
 cd frontend && npx vitest run
 
 # Docker Compose 로컬 실행
@@ -93,6 +95,20 @@ bash scripts/integration-test.sh
 2. **Frontend Tests** — vitest + tsc --noEmit + coverage
 3. **Integration Tests** — Docker Compose + smoke + E2E
 4. **Test Report** — dorny/test-reporter + 커버리지 PR 코멘트
+
+## 에이전트 사용법
+
+### reviewer (읽기 전용 코드 리뷰)
+reviewer는 Bash 없이 Read/Glob/Grep만 사용. PR diff를 직접 조회할 수 없으므로, 호출 시 변경 맥락을 전달:
+```
+변경된 파일: backend/characters.py, frontend/src/pages/LoginPage.tsx
+주요 변경: 캐릭터 생성 시 이름 검증 추가, 로그인 에러 메시지 개선
+이 변경사항을 reviewer 에이전트로 리뷰해줘.
+```
+
+## Permissions 참고
+
+`.claude/settings.json`의 deny/ask 규칙은 Bash 패턴 매칭 기반이며, 모든 명령 변형을 완벽히 차단하지는 못함 (예: `rm -r -f`, `--force-with-lease`). GitHub branch protection과 함께 이중 보호로 사용. v2에서 PreToolUse 훅으로 강화 예정.
 
 ## API 패턴
 
