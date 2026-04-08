@@ -109,6 +109,24 @@ def test_create_item_requires_admin(client):
     assert resp.status_code == 401
 
 
+def test_update_item_requires_admin(client, admin_client):
+    """미인증 수정 요청은 401 반환"""
+    iid = admin_client.post("/api/items", json={
+        "name": "UpdAuth", "category": "drop",
+    }).get_json()["item"]["id"]
+    resp = client.put(f"/api/items/{iid}", json={"name": "Hacked"})
+    assert resp.status_code == 401
+
+
+def test_delete_item_requires_admin(client, admin_client):
+    """미인증 삭제 요청은 401 반환"""
+    iid = admin_client.post("/api/items", json={
+        "name": "DelAuth", "category": "drop",
+    }).get_json()["item"]["id"]
+    resp = client.delete(f"/api/items/{iid}")
+    assert resp.status_code == 401
+
+
 # ── use_item tests ──
 
 def test_use_item_success(app, client):
