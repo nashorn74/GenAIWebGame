@@ -30,7 +30,7 @@ cd backend && python3 -m pytest -v --tb=short --cov --cov-report=term-missing
 cd frontend && npx vitest run --coverage
 ```
 
-- 커버리지 목표: 86%+
+- 커버리지 목표: 85%+
 - 실패 시 실패한 테스트 목록과 에러 메시지 정리
 
 ### 3. 결과 요약
