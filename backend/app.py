@@ -19,9 +19,10 @@ from sqlalchemy import select
 from utils.walkable import get_walkable, get_tilemap
 from random import choice, shuffle
 from typing import Any
-import os, redis
+import os
 import time
 import json
+import redis                     # ▸ pip install redis
 
 knockback_until: dict[int, float] = {}   # {monster_id: unix_timestamp}
 last_move_sent: dict[int, float] = {}   # {char_id: unix_ts}
@@ -29,8 +30,6 @@ last_move_sent: dict[int, float] = {}   # {char_id: unix_ts}
 # ---------------------------------------------
 # redis 연결
 # ---------------------------------------------
-import os, redis
-import redis                     # ▸ pip install redis
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 os.environ["EVENTLET_NO_GREENDNS"] = "yes" 
 
@@ -335,7 +334,7 @@ def create_app():
                                 print(resp_pkt)
                                 socketio.emit('player_respawn', resp_pkt, room=f'map_{prev_map}')
 
-                                target_sid = get_sid_by_char(target.id).decode();
+                                target_sid = get_sid_by_char(target.id)
                                 print(target_sid)
                                 if target_sid:
                                     # ① 이전 방 모든 플레이어에게 despawn (잔상 제거)
@@ -373,9 +372,11 @@ def create_app():
 
                     db.session.commit()
             except Exception:
+                app.logger.exception(
+                    "monster_ai 루프 예외 — 루프 계속 진행"
+                )
                 with app.app_context():        # 롤백도 컨텍스트 안에서
                     db.session.rollback()
-                raise
             finally:
                 with app.app_context():
                     db.session.remove()
@@ -472,11 +473,6 @@ def create_app():
             db.session.rollback()
             return
         # ───────────────────────
-
-        char: Character = db.session.get(Character, char_id)
-        if not char:
-            db.session.remove()
-            return
 
         # ── 0. 이동 전·후 좌표 계산 ───────────────────────────────
         prev_px, prev_py = (char.x or new_px), (char.y or new_py)
@@ -612,18 +608,17 @@ def create_app():
             print("disconnect 중 오류 발생 - SID를 얻을 수 없음")
             return
         
-        # Redis 또는 데이터베이스에서 모든 키를 문자열로 처리하도록 조정
+        # 제거 전에 먼저 map_key를 조회하고, 그 다음 제거
         try:
+            map_key = get_map_by_sid(sid) or "unknown"
             char_id = remove_sid(sid)
             if char_id is None:
                 return
-                
-            # 모든 ID를 문자열로 안전하게 변환
-            safe_char_id = str(char_id.decode('utf-8') if isinstance(char_id, bytes) else char_id)
-            
-            map_key = get_map_by_sid(sid) or "unknown"
-            safe_map_key = str(map_key.decode('utf-8') if isinstance(map_key, bytes) else map_key)
-            
+
+            # decode_responses=True이므로 이미 문자열
+            safe_char_id = str(char_id)
+            safe_map_key = str(map_key)
+
             # 안전한 값으로 이벤트 발송
             room_name = f"map_{safe_map_key}"
             leave_room(room_name, sid=sid)
