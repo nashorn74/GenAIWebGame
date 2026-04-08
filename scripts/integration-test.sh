@@ -4,9 +4,13 @@
 set -euo pipefail
 
 BASE="http://localhost:8080"
+COOKIE_JAR=$(mktemp)   # admin 세션 쿠키 저장용
 PASS=0
 FAIL=0
 TOTAL=0
+
+cleanup() { rm -f "$COOKIE_JAR"; }
+trap cleanup EXIT
 
 # ── 유틸리티 ──
 
@@ -16,7 +20,7 @@ assert_status() {
   local status body tmpfile
   TOTAL=$((TOTAL + 1))
   tmpfile=$(mktemp)
-  status=$(curl -s -o "$tmpfile" -w "%{http_code}" -X "$method" -H "Content-Type: application/json" "$@" "$url" 2>/dev/null || echo "000")
+  status=$(curl -s -o "$tmpfile" -w "%{http_code}" -X "$method" -H "Content-Type: application/json" -b "$COOKIE_JAR" -c "$COOKIE_JAR" "$@" "$url" 2>/dev/null || echo "000")
   body=$(cat "$tmpfile")
   rm -f "$tmpfile"
   if [ "$status" = "$expect" ]; then
@@ -151,6 +155,11 @@ echo "     → moved to map=$CHAR_MAP"
 # ──────────────────────────────────────────
 echo ""
 echo "── 5. 아이템 & 상점 거래 ──"
+
+# 5-0. 관리자 로그인 (아이템/NPC 생성·삭제에 admin 세션 필요)
+assert_status "POST /auth/admin_login → 200" \
+  POST "$BASE/auth/admin_login" "200" \
+  -d "{\"username\":\"${ADMIN_USERNAME:-admin}\",\"password\":\"${ADMIN_PASSWORD:-admin}\"}"
 
 # 5-1. 아이템 생성 (테스트 데이터, 기본 골드=100 이내 가격)
 assert_status "POST /api/items (potion) → 201" \

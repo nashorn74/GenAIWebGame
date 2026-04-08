@@ -43,7 +43,7 @@ def create_map():
         return jsonify({'error': 'key is required'}), 400
     
     # 중복 체크
-    existing = Map.query.get(map_key)
+    existing = db.session.get(Map, map_key)
     if existing:
         return jsonify({'error': 'Map key already exists'}), 400
 

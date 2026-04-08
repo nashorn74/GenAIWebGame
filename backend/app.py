@@ -194,6 +194,7 @@ def create_app():
             try:
                 with app.app_context():
                     # dungeon1 맵의 캐릭터만 로드 (전체 로드 방지)
+                    # TODO: 다른 맵에 몬스터가 추가되면 map_key를 동적으로 처리해야 함
                     chars = {c.id: c for c in Character.query.filter_by(map_key='dungeon1').all()}
 
                     now  = time.time()

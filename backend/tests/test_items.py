@@ -103,6 +103,12 @@ def test_create_item_missing_name(admin_client):
     assert "name" in resp.get_json()["error"].lower()
 
 
+def test_create_item_requires_admin(client):
+    """미인증 요청은 401 반환"""
+    resp = client.post("/api/items", json={"name": "Hack", "category": "weapon"})
+    assert resp.status_code == 401
+
+
 # ── use_item tests ──
 
 def test_use_item_success(app, client):

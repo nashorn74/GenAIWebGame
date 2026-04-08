@@ -91,7 +91,8 @@ export default function CharacterSelect() {
           <Button size="small" color="error"
             onClick={async ()=>{
               if(!confirm('Delete this character?')) return
-              await fetch(`${BASE_URL}/api/characters/${char.id}`,{method:'DELETE'})
+              const r = await fetch(`${BASE_URL}/api/characters/${char.id}`,{method:'DELETE'})
+              if(!r.ok) { alert('삭제 실패'); return }
               reload()
             }}>Delete</Button>
         </CardActions>
