@@ -16,6 +16,7 @@ from maps import maps_bp
 from monsters import monsters_bp
 from sqlalchemy.orm import Session   # 타입 힌트용
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from utils.walkable import get_walkable, get_tilemap
 from random import choice, shuffle
 from typing import Any
@@ -192,8 +193,8 @@ def create_app():
             socketio.sleep(2.0)
             try:
                 with app.app_context():
-                    # 모든 캐릭터 위치 미리 캐시(딕셔너리)
-                    chars = {c.id: c for c in Character.query.all()}
+                    # dungeon1 맵의 캐릭터만 로드 (전체 로드 방지)
+                    chars = {c.id: c for c in Character.query.filter_by(map_key='dungeon1').all()}
 
                     now  = time.time()
 
@@ -562,7 +563,6 @@ def create_app():
             
             if mob.drop_item_id:                           # NULL 가드
                 # race-safe upsert: INSERT ON CONFLICT UPDATE
-                from sqlalchemy.dialects.postgresql import insert as pg_insert
                 stmt = pg_insert(CharacterItem).values(
                     character_id=char.id,
                     item_id=mob.drop_item_id,
@@ -723,7 +723,7 @@ if __name__ == '__main__':
                 NPC(name='Garrett Leaf', gender='Male', race='Human', job='Traveling Merchant', map_key='city2',
                     x=10, y=11, dialog='안녕하세요! 물건을 구경해 보실래요?', npc_type='shop')
             ]
-            db.session.bulk_save_objects(seed_npcs)
+            db.session.add_all(seed_npcs)
             db.session.commit()
         
         # 2) 아이템 시드
@@ -763,7 +763,7 @@ if __name__ == '__main__':
                 Item(name='Scale Armor',      category='armor', description='방어력+15(비늘)',   buy_price=120, sell_price=0, defense_power=15),
                 Item(name='Mystic Robe',      category='armor', description='방어+5, 마법공+3',  buy_price=90, sell_price=0, defense_power=5, attack_power=3),
             ]
-            db.session.bulk_save_objects(seed_items)
+            db.session.add_all(seed_items)
             db.session.commit()
         
         # 3) Map 시드
@@ -840,7 +840,7 @@ if __name__ == '__main__':
                     }'''
                 )
             ]
-            db.session.bulk_save_objects(seed_maps)
+            db.session.add_all(seed_maps)
             db.session.commit()
         
         if Monster.query.count() == 0:

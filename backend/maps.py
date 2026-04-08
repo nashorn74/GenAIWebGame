@@ -1,6 +1,7 @@
 # maps.py
 from flask import Blueprint, request, jsonify
 from models import db, Map
+from auth_admin import admin_required
 
 maps_bp = Blueprint('maps', __name__)
 
@@ -19,8 +20,9 @@ def get_map(map_key):
     m = Map.query.get_or_404(map_key)
     return jsonify(m.to_dict())
 
-# 3) 맵 생성
+# 3) 맵 생성 — 관리자 전용
 @maps_bp.route('/maps', methods=['POST'])
+@admin_required
 def create_map():
     """
     예:
@@ -60,8 +62,9 @@ def create_map():
     db.session.commit()
     return jsonify({'message': 'Map created', 'map': new_map.to_dict()}), 201
 
-# 4) 맵 수정
+# 4) 맵 수정 — 관리자 전용
 @maps_bp.route('/maps/<string:map_key>', methods=['PUT'])
+@admin_required
 def update_map(map_key):
     m = Map.query.get_or_404(map_key)
     data = request.get_json() or {}
@@ -81,8 +84,9 @@ def update_map(map_key):
     db.session.commit()
     return jsonify({'message': 'Map updated', 'map': m.to_dict()})
 
-# 5) 맵 삭제
+# 5) 맵 삭제 — 관리자 전용
 @maps_bp.route('/maps/<string:map_key>', methods=['DELETE'])
+@admin_required
 def delete_map(map_key):
     m = Map.query.get_or_404(map_key)
     db.session.delete(m)
