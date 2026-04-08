@@ -39,19 +39,25 @@ export default function ShopDialog ({
     let cancelled = false
     setLoading(true);
     (async () => {
-      const [newItems, newInv] = await Promise.all([
-        fetchShopItems(),
-        fetchInventory(charId),
-      ])
-      if (cancelled) return
-      console.log('[shop] 초기 로드 — shopItems:', newItems.length, 'inv:', newInv.length)
-      setItems(newItems)
-      setInv(newInv)
-      setTab('buy')
-      setSelId(undefined)
-      setQty(1)
-      setMsg(undefined)
-      setLoading(false)
+      try {
+        const [newItems, newInv] = await Promise.all([
+          fetchShopItems(),
+          fetchInventory(charId),
+        ])
+        if (cancelled) return
+        console.log('[shop] 초기 로드 — shopItems:', newItems.length, 'inv:', newInv.length)
+        setItems(newItems)
+        setInv(newInv)
+        setTab('buy')
+        setSelId(undefined)
+        setQty(1)
+        setMsg(undefined)
+      } catch (e) {
+        if (!cancelled) setMsg('상점 데이터를 불러올 수 없습니다.')
+        console.error('[shop] 초기 로드 실패:', e)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     })()
     return () => { cancelled = true }
   }, [npc, charId])

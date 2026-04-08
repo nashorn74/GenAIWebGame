@@ -72,21 +72,20 @@ def update_sid_map(sid: str, map_key: str):
     r.hset(K_SID_TO_MAP, sid, map_key)
 
 def remove_sid(sid: str):
-    """disconnect 때 호출: hash 2 곳 모두 clean + char_id 반환"""
+    """disconnect 때 호출: hash 2 곳 모두 clean + char_id 반환 (없으면 None)"""
     pipe = r.pipeline()
-    char_id = None
     # sid -> map 해시에서 pop
     pipe.hget(K_SID_TO_MAP, sid)
     pipe.hdel(K_SID_TO_MAP, sid)
     # char_to_sid 해시에서 역-검색
-    char_id = r.hgetall(K_CHAR_TO_SID)        # 작은 해시라 OK
-    for cid, stored in char_id.items():
+    found_cid = None
+    for cid, stored in r.hgetall(K_CHAR_TO_SID).items():
         if stored == sid:
-            char_id = int(cid)
+            found_cid = int(cid)
             pipe.hdel(K_CHAR_TO_SID, cid)
             break
     pipe.execute()
-    return char_id
+    return found_cid
 # ---------------------------------------------
 
 from math import hypot
