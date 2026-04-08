@@ -134,7 +134,11 @@ export default function ShopDialog ({
             </Box>
           }
 
-          {!loading && list.length === 0 &&
+          {!loading && msg && list.length === 0 &&
+            <Alert severity="error" sx={{ m: 2 }}>{msg}</Alert>
+          }
+
+          {!loading && !msg && list.length === 0 &&
             <Typography sx={{ p: 2 }} color="text.secondary">
               {tab === 'buy'
                 ? '구매 가능한 아이템이 없습니다.'

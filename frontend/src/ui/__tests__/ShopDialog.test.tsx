@@ -170,6 +170,21 @@ describe('ShopDialog', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('shows error message and hides spinner when initial load fails', async () => {
+    vi.mocked(itemsUtil.fetchShopItems).mockRejectedValue(new Error('500'))
+    render(
+      <ShopDialog
+        npc={shopNpc} charId={1} charGold={1000}
+        onClose={onClose} onAfterTrade={onAfterTrade}
+      />,
+    )
+    await waitFor(() => {
+      expect(screen.getByText('상점 데이터를 불러올 수 없습니다.')).toBeInTheDocument()
+    })
+    // 스피너가 사라졌는지 확인 (loading=false)
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
   it('shows error message on trade error response', async () => {
     vi.mocked(itemsUtil.buyItem).mockResolvedValue({ error: '골드 부족' })
     const user = userEvent.setup()
