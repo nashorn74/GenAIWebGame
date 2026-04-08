@@ -4,6 +4,17 @@ from models import db, NPC, Character, Item, CharacterItem
 
 shop_bp = Blueprint('shop', __name__)
 
+
+def _validate_shop_npc(npc_id: int):
+    """상점 NPC 검증 — shop 타입이 아니거나 비활성이면 (None, 에러응답) 반환"""
+    npc = NPC.query.get_or_404(npc_id)
+    if npc.npc_type != 'shop':
+        return None, (jsonify({'error': 'This NPC is not a shop NPC'}), 400)
+    if not npc.is_active:
+        return None, (jsonify({'error': 'NPC is not active'}), 400)
+    return npc, None
+
+
 @shop_bp.route('/shops/<int:npc_id>/buy', methods=['POST'])
 def buy_item(npc_id):
     """
@@ -21,11 +32,9 @@ def buy_item(npc_id):
     qty = data.get('quantity', 1)
 
     # 1) NPC 확인
-    npc = NPC.query.get_or_404(npc_id)
-    if npc.npc_type != 'shop':
-        return jsonify({'error': 'This NPC is not a shop NPC'}), 400
-    if not npc.is_active:
-        return jsonify({'error': 'NPC is not active'}), 400
+    npc, err = _validate_shop_npc(npc_id)
+    if err:
+        return err
 
     # 2) 캐릭터 / 아이템 확인
     char = Character.query.get_or_404(char_id)
@@ -74,11 +83,9 @@ def sell_item(npc_id):
     qty = data.get('quantity', 1)
 
     # 1) NPC 확인
-    npc = NPC.query.get_or_404(npc_id)
-    if npc.npc_type != 'shop':
-        return jsonify({'error': 'This NPC is not a shop NPC'}), 400
-    if not npc.is_active:
-        return jsonify({'error': 'NPC is not active'}), 400
+    npc, err = _validate_shop_npc(npc_id)
+    if err:
+        return err
 
     # 2) 캐릭터 / 아이템
     char = Character.query.get_or_404(char_id)
