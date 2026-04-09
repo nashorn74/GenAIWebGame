@@ -71,15 +71,19 @@ def bind_char_sid(char_id: int, sid: str, map_key: str):
     pipe.hset(K_CHAR_TO_SID, char_id, sid)
     pipe.hset(K_SID_TO_MAP , sid    , map_key)
     pipe.execute()
+    print(
+        f"[sid_bind] char_id={char_id} old_sid={old_sid} new_sid={sid} map_key={map_key}",
+        flush=True,
+    )
 
 def update_sid_map(sid: str, map_key: str):
     r.hset(K_SID_TO_MAP, sid, map_key)
 
 def remove_sid(sid: str):
     """disconnect 때 호출: hash 2 곳 모두 clean + char_id 반환 (없으면 None)"""
+    old_map = get_map_by_sid(sid)
     pipe = r.pipeline()
     # sid -> map 해시에서 pop
-    pipe.hget(K_SID_TO_MAP, sid)
     pipe.hdel(K_SID_TO_MAP, sid)
     # char_to_sid 해시에서 역-검색
     found_cid = None
@@ -89,6 +93,10 @@ def remove_sid(sid: str):
             pipe.hdel(K_CHAR_TO_SID, cid)
             break
     pipe.execute()
+    print(
+        f"[sid_remove] sid={sid} char_id={found_cid} map_key={old_map}",
+        flush=True,
+    )
     return found_cid
 # ---------------------------------------------
 
@@ -599,6 +607,7 @@ def create_app():
     # ── handle_move 디버그 카운터 (rate-limited 출력) ──
     _move_debug: dict[str, int] = {}       # 카운터
     _move_debug_ts: list[float] = [0.0]    # 마지막 출력 시각
+    _move_debug_detail: dict[str, str] = {}
 
     def flush_move_debug(now: float | None = None) -> None:
         if not _move_debug:
@@ -609,11 +618,42 @@ def create_app():
             return
         _move_debug_ts[0] = now
         print(
-            f"[move_debug] {_move_debug}  "
+            f"[move_debug] {_move_debug} "
+            f"detail={_move_debug_detail} "
             f"monster_tiles={dict((k, len(v)) for k, v in _monster_tiles_by_map.items())}",
             flush=True,
         )
         _move_debug.clear()
+        _move_debug_detail.clear()
+
+    def maybe_rebind_char_sid(char_id: int, sid: str, map_key: str, expected_sid: str | None) -> bool:
+        current_sid_map = get_map_by_sid(sid)
+        expected_sid_map = get_map_by_sid(expected_sid) if expected_sid else None
+
+        if expected_sid is None and current_sid_map == map_key:
+            bind_char_sid(char_id, sid, map_key)
+            print(
+                f"[sid_heal] char_id={char_id} reason=missing current_sid={sid} map_key={map_key}",
+                flush=True,
+            )
+            return True
+
+        if expected_sid and expected_sid != sid and expected_sid_map is None and current_sid_map == map_key:
+            bind_char_sid(char_id, sid, map_key)
+            print(
+                "[sid_heal] "
+                f"char_id={char_id} reason=stale expected_sid={expected_sid} "
+                f"current_sid={sid} map_key={map_key}",
+                flush=True,
+            )
+            return True
+
+        _move_debug_detail['sid_reject'] = (
+            f"char_id={char_id} expected_sid={expected_sid} current_sid={sid} "
+            f"expected_sid_map={expected_sid_map} current_sid_map={current_sid_map} "
+            f"move_map={map_key}"
+        )
+        return False
 
     # ② 이동 — outer (같은 타일이면 DB 완전 스킵)
     @socketio.on('move')
@@ -632,9 +672,12 @@ def create_app():
         # Redis로 sid 검증 (fail-closed: 매핑 없으면 차단)
         expected_sid = get_sid_by_char(char_id)
         if not expected_sid or expected_sid != request.sid:
-            _move_debug['sid_reject'] = _move_debug.get('sid_reject', 0) + 1
-            flush_move_debug()
-            return
+            if maybe_rebind_char_sid(char_id, request.sid, new_map, expected_sid):
+                expected_sid = request.sid
+            else:
+                _move_debug['sid_reject'] = _move_debug.get('sid_reject', 0) + 1
+                flush_move_debug()
+                return
 
         # 타일 좌표 계산
         tx = int(new_px // TILE)

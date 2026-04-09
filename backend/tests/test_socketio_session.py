@@ -411,6 +411,50 @@ def test_move_spoofed_sid_rejected(sio_client):
                 mock_get.assert_not_called()  # DB 접근 없이 차단
 
 
+def test_move_missing_char_sid_mapping_self_heals(raw_sio_client):
+    """char_to_sid 누락 + 현재 sid가 같은 맵에 있으면 move에서 재바인딩 복구."""
+    sc, app = raw_sio_client
+    import app as app_mod
+    from models import db
+    with app.app_context():
+        char = _make_user_and_char('missing_sid_map', map_key='city')
+        sc.emit('join_map', {'character_id': char.id, 'map_key': 'city'})
+
+        bound_sid = app.fake_redis.hget(app_mod.K_CHAR_TO_SID, char.id)
+        assert bound_sid is not None
+        app.fake_redis.hdel(app_mod.K_CHAR_TO_SID, char.id)
+
+        with patch.object(db.session, 'get', wraps=db.session.get) as spy_get:
+            sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                             'x': 32, 'y': 32})
+            spy_get.assert_called()
+
+        assert app.fake_redis.hget(app_mod.K_CHAR_TO_SID, char.id) == bound_sid
+
+
+def test_move_stale_sid_mapping_self_heals(raw_sio_client):
+    """stale old sid만 남고 현재 sid가 같은 맵에 있으면 move에서 현재 sid로 복구."""
+    sc, app = raw_sio_client
+    import app as app_mod
+    from models import db
+    with app.app_context():
+        char = _make_user_and_char('stale_sid_map', map_key='city')
+        sc.emit('join_map', {'character_id': char.id, 'map_key': 'city'})
+
+        current_sid = app.fake_redis.hget(app_mod.K_CHAR_TO_SID, char.id)
+        assert current_sid is not None
+        app.fake_redis.hset(app_mod.K_CHAR_TO_SID, char.id, 'stale_sid_123')
+        app.fake_redis.hdel(app_mod.K_SID_TO_MAP, 'stale_sid_123')
+        app.fake_redis.hset(app_mod.K_SID_TO_MAP, current_sid, 'city')
+
+        with patch.object(db.session, 'get', wraps=db.session.get) as spy_get:
+            sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                             'x': 32, 'y': 32})
+            spy_get.assert_called()
+
+        assert app.fake_redis.hget(app_mod.K_CHAR_TO_SID, char.id) == current_sid
+
+
 def test_move_no_redis_mapping_rejected(sio_client):
     """Redis에 sid 매핑 없는 캐릭터의 move 이벤트 차단"""
     sc, app = sio_client
