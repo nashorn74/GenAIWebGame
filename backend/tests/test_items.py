@@ -53,27 +53,27 @@ def test_create_item(admin_client):
     assert resp.get_json()["item"]["name"] == "Iron Sword"
 
 
-def test_list_items(admin_client):
+def test_list_items(client, admin_client):
     admin_client.post("/api/items", json={"name": "Sword", "category": "weapon"})
     admin_client.post("/api/items", json={"name": "Potion", "category": "potion"})
-    resp = admin_client.get("/api/items")
+    resp = client.get("/api/items")
     assert resp.status_code == 200
     assert len(resp.get_json()) == 2
 
 
-def test_list_items_filter_category(admin_client):
+def test_list_items_filter_category(client, admin_client):
     admin_client.post("/api/items", json={"name": "Sword2", "category": "weapon"})
     admin_client.post("/api/items", json={"name": "Potion2", "category": "potion"})
-    resp = admin_client.get("/api/items?category=weapon")
+    resp = client.get("/api/items?category=weapon")
     data = resp.get_json()
     assert all(i["category"] == "weapon" for i in data)
 
 
-def test_get_item(admin_client):
+def test_get_item(client, admin_client):
     iid = admin_client.post("/api/items", json={
         "name": "GetItem", "category": "drop",
     }).get_json()["item"]["id"]
-    resp = admin_client.get(f"/api/items/{iid}")
+    resp = client.get(f"/api/items/{iid}")
     assert resp.status_code == 200
     assert resp.get_json()["name"] == "GetItem"
 
@@ -87,13 +87,13 @@ def test_update_item(admin_client):
     assert resp.get_json()["item"]["name"] == "NewName"
 
 
-def test_delete_item(admin_client):
+def test_delete_item(client, admin_client):
     iid = admin_client.post("/api/items", json={
         "name": "DelItem", "category": "drop",
     }).get_json()["item"]["id"]
     resp = admin_client.delete(f"/api/items/{iid}")
     assert resp.status_code == 200
-    resp = admin_client.get(f"/api/items/{iid}")
+    resp = client.get(f"/api/items/{iid}")
     assert resp.status_code == 404
 
 

@@ -7,26 +7,26 @@ def test_create_npc(admin_client):
     assert resp.get_json()["npc"]["name"] == "Guard"
 
 
-def test_list_npcs(admin_client):
+def test_list_npcs(client, admin_client):
     admin_client.post("/api/npcs", json={"name": "NPC1", "map_key": "city2"})
     admin_client.post("/api/npcs", json={"name": "NPC2", "map_key": "dungeon1"})
-    resp = admin_client.get("/api/npcs")
+    resp = client.get("/api/npcs")
     assert len(resp.get_json()) == 2
 
 
-def test_list_npcs_filter_map(admin_client):
+def test_list_npcs_filter_map(client, admin_client):
     admin_client.post("/api/npcs", json={"name": "CityNPC", "map_key": "city2"})
     admin_client.post("/api/npcs", json={"name": "DungNPC", "map_key": "dungeon1"})
-    resp = admin_client.get("/api/npcs?map_key=city2")
+    resp = client.get("/api/npcs?map_key=city2")
     data = resp.get_json()
     assert all(n["map_key"] == "city2" for n in data)
 
 
-def test_get_npc_dialog(admin_client):
+def test_get_npc_dialog(client, admin_client):
     nid = admin_client.post("/api/npcs", json={
         "name": "Talker", "dialog": "Welcome!",
     }).get_json()["npc"]["id"]
-    resp = admin_client.get(f"/api/npcs/{nid}/dialog")
+    resp = client.get(f"/api/npcs/{nid}/dialog")
     assert resp.status_code == 200
     assert resp.get_json()["dialog"] == "Welcome!"
 
@@ -41,11 +41,11 @@ def test_update_npc(admin_client):
     assert resp.get_json()["npc"]["npc_type"] == "shop"
 
 
-def test_delete_npc(admin_client):
+def test_delete_npc(client, admin_client):
     nid = admin_client.post("/api/npcs", json={"name": "Del"}).get_json()["npc"]["id"]
     resp = admin_client.delete(f"/api/npcs/{nid}")
     assert resp.status_code == 200
-    resp = admin_client.get(f"/api/npcs/{nid}")
+    resp = client.get(f"/api/npcs/{nid}")
     assert resp.status_code == 404
 
 
