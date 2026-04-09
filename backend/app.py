@@ -460,7 +460,8 @@ def create_app():
     # ② 이동 — inner (타일 변경 시에만 DB 접근)
     @with_db_session
     def _handle_move_tile_change(char_id, new_map, new_px, new_py, tx, ty):
-        """타일 변경 시 DB 조회/커밋 + 몬스터 전투 처리. 성공 시 True 반환."""
+        """타일 변경 시 DB 조회/커밋 + 몬스터 전투 처리.
+        True=캐시 가능(몬스터 없음), False=캐시 금지(전투/에러)."""
         char: Character = db.session.get(Character, char_id)
         if not char or char.hp <= 0:
             return False
@@ -569,7 +570,8 @@ def create_app():
 
         db.session.commit()
         update_sid_map(request.sid, char.map_key)
-        return True
+        # 몬스터 전투 발생 → 캐시 금지 (같은 타일 재진입 시 다시 DB 경로)
+        return False
 
     # ② 이동 — outer (같은 타일이면 DB 완전 스킵)
     @socketio.on('move')

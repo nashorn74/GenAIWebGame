@@ -1,0 +1,65 @@
+name: Socket.IO Load Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Load profile to run
+        required: true
+        default: heavy
+        type: choice
+        options:
+          - light
+          - heavy
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  socketio-load:
+    name: Socket.IO Load (${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'heavy' }})
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build backend image
+        run: docker build -t arkacia-backend:ci ./backend
+
+      - name: Build frontend image
+        run: docker build -t arkacia-frontend:ci ./frontend
+
+      - name: Start containers
+        run: docker compose -f docker-compose.ci.yml up -d --wait --wait-timeout 60
+
+      - name: Run smoke tests
+        run: bash -o pipefail -c 'bash scripts/smoke-test.sh | tee smoke-output.txt'
+
+      - name: Run Socket.IO load test
+        run: |
+          PROFILE="${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'heavy' }}"
+          bash -o pipefail -c "docker compose -f docker-compose.ci.yml exec -T backend python scripts/socketio-load-test.py --profile ${PROFILE} --base-url http://localhost:5000 | tee socketio-load-output.txt"
+
+      - name: Generate JUnit XML from load test results
+        if: always()
+        run: |
+          mkdir -p test-results
+          bash scripts/smoke-to-junit.sh smoke-output.txt test-results/smoke.xml
+          bash scripts/smoke-to-junit.sh socketio-load-output.txt test-results/socketio-load.xml
+
+      - name: Upload load test artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: socketio-load-results
+          path: |
+            smoke-output.txt
+            socketio-load-output.txt
+            test-results/
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.ci.yml logs
+
+      - name: Stop containers
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v

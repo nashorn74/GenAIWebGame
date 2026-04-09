@@ -117,12 +117,29 @@ jobs:
       - name: Run integration tests (user flow)
         run: bash -o pipefail -c 'bash scripts/integration-test.sh | tee integration-output.txt'
 
+      - name: Restart backend with constrained pool
+        run: |
+          docker compose -f docker-compose.ci.yml stop backend
+          docker compose -f docker-compose.ci.yml rm -f backend
+          DB_POOL_SIZE=1 DB_MAX_OVERFLOW=0 DB_POOL_TIMEOUT=1 \
+            docker compose -f docker-compose.ci.yml up -d --wait --wait-timeout 60 backend
+
+      - name: Run lightweight Socket.IO load test
+        run: |
+          bash -o pipefail -c \
+            'docker compose -f docker-compose.ci.yml exec -T backend \
+              python scripts/socketio-load-test.py --profile light --base-url http://localhost:5000 \
+              | tee socketio-load-output.txt'
+
       - name: Generate JUnit XML from test results
         if: always()
         run: |
           mkdir -p test-results
           bash scripts/smoke-to-junit.sh smoke-output.txt test-results/smoke.xml
           bash scripts/smoke-to-junit.sh integration-output.txt test-results/integration.xml
+          if [ -f socketio-load-output.txt ]; then
+            bash scripts/smoke-to-junit.sh socketio-load-output.txt test-results/socketio-load.xml
+          fi
 
       - name: Upload integration test results
         if: always()
