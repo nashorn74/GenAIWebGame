@@ -13,7 +13,10 @@ def with_db_session(f):
         try:
             return f(*args, **kwargs)
         except Exception:
-            db.session.rollback()
+            try:
+                db.session.rollback()
+            except Exception:
+                pass  # 커넥션 자체가 없는 상태에서 rollback 실패 가능
             raise
         finally:
             db.session.remove()

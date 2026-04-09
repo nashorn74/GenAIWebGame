@@ -28,6 +28,7 @@ import redis                     # ▸ pip install redis
 
 knockback_until: dict[int, float] = {}   # {monster_id: unix_timestamp}
 last_move_sent: dict[int, float] = {}   # {char_id: unix_ts}
+_last_tile: dict[int, tuple[str, int, int]] = {}   # {char_id: (map_key, tx, ty)}
 
 # ---------------------------------------------
 # redis 연결
@@ -305,6 +306,7 @@ def create_app():
                             if target.hp <= 0:
                                 target.hp = 0
                                 dead = True
+                                _last_tile.pop(target.id, None)
                             else:
                                 dead = False
                             # ----------------------------------------------------
@@ -403,6 +405,7 @@ def create_app():
     def handle_join_map(data):
         sid        = request.sid
         char_id    = data['character_id']
+        _last_tile.pop(char_id, None)
         req_map    = data.get('map_key')
         # 0) 로드 & DB 반영
         char:Character = db.session.get(Character, char_id)
@@ -454,46 +457,24 @@ def create_app():
         monsters = Monster.query.filter_by(map_key=map_key, is_alive=True).all()
         emit('current_monsters', [m.to_dict() for m in monsters])
 
-    # ② 이동
-    @socketio.on('move')
+    # ② 이동 — inner (타일 변경 시에만 DB 접근)
     @with_db_session
-    def handle_move(data):
-        """
-        • 플레이어 이동 브로드캐스트
-        • 이동한 타일에 몬스터가 있으면 타격 → 데미지 / 넉백 / 드롭 처리
-        """
-        char_id   = data.get('character_id')
-        new_map   = data.get('map_key')
-        new_px    = data.get('x')
-        new_py    = data.get('y')
-
+    def _handle_move_tile_change(char_id, new_map, new_px, new_py, tx, ty):
+        """타일 변경 시 DB 조회/커밋 + 몬스터 전투 처리. 성공 시 True 반환."""
         char: Character = db.session.get(Character, char_id)
-        if not char or char.hp <= 0:          # ★ 추가
-            return
+        if not char or char.hp <= 0:
+            return False
 
-        # ───────── NEW ─────────
-        if new_px is None or new_py is None:
-            # 잘못된 패킷 → 조용히 무시 (데코레이터가 세션 정리)
-            return
-        # ───────────────────────
-
-        # ── 0. 이동 전·후 좌표 계산 ───────────────────────────────
-        prev_px, prev_py = (char.x or new_px), (char.y or new_py)
         char.map_key, char.x, char.y = new_map, new_px, new_py
-        db.session.commit()                              # 캐릭터 위치 확정
+        db.session.commit()
 
-        # ── 0-1.  이동 패킷 rate-limit ─────────────────────────
+        # 이동 패킷 rate-limit
         now = time.time()
         if now - last_move_sent.get(char_id, 0) >= 0.12:   # 120 ms
             emit('player_move', {'id': char_id,
                                 'x': new_px, 'y': new_py},
                 room=f"map_{new_map}", include_self=False)
             last_move_sent[char_id] = now
-        # ----------------------------------------------------
-
-        # 픽셀 → 타일 좌표
-        tx,  ty  = int(new_px  // TILE), int(new_py  // TILE)
-        ptx, pty = int(prev_px // TILE), int(prev_py // TILE)
 
         # ── 1. 해당 타일에 살아있는 몬스터 탐색 ──────────────────
         mob: Monster | None = (
@@ -503,21 +484,20 @@ def create_app():
                             is_alive=True)
                 .first()
         )
-        if not mob:                                        # 충돌 X
-            return
+        if not mob:
+            update_sid_map(request.sid, char.map_key)
+            return True
 
         # ── 2. 데미지 계산 ──────────────────────────────────────
         atk  = max(1, char.str)                            # 아주 단순한 예시
         dmg  = max(1, atk - mob.defense)
         mob.hp -= dmg                       # ← 음수로 갈 수 있음
 
-        # --- NEW: 체력 보정 + 죽음 판정 ---
         if mob.hp <= 0:
             mob.hp = 0
             mob_dead = True
         else:
             mob_dead = False
-        # ---------------------------------
 
         # ── 3. 넉백 계산 ──────────────────────────────────────────
         dx = 1 if mob.x > tx else -1 if mob.x < tx else 0
@@ -530,16 +510,14 @@ def create_app():
                                 map_key=new_map, is_alive=True)}
 
             last_free: tuple[int,int] | None = None
-            # 1 → 2칸 ‘계단식’ 루프
             for step in (1, 2):
                 nx = mob.x + dx*step
                 ny = mob.y + dy*step
-                # 벽이거나 다른 몬스터가 있으면 멈춤
                 if (nx, ny) not in walkable or (nx, ny) in occupied:
                     break
-                last_free = (nx, ny)            # 한 칸씩 전진하며 기록
+                last_free = (nx, ny)
 
-            if last_free:                       # 최소 1칸은 비어 있었음
+            if last_free:
                 mob.x, mob.y = last_free
                 knockback_until[mob.id] = time.time() + 3
 
@@ -548,23 +526,20 @@ def create_app():
             now = time.time()
             mob.is_alive = False
             mob.died_at  = now
-            knockback_until.pop(mob.id, None)   # 쿨타임 정보 정리
+            knockback_until.pop(mob.id, None)
 
-            # 경험치 보상 (간단히 몬스터 레벨 * EXP_PER_LEVEL)
             gained = mob.level * EXP_PER_LEVEL
             prev_lv = char.level
             char.gain_exp(gained)
             level_up = char.level > prev_lv
-            # 클라이언트에 알림
             socketio.emit('exp_gain', {
                 "char_id": char.id, "exp": gained,
                 "total_exp": char.exp, "level": char.level, "level_up": level_up,
                 "hp": char.hp, "max_hp": char.max_hp,
                 "mp": char.mp, "max_mp": char.max_mp,
             }, room=f"map_{new_map}")
-            
-            if mob.drop_item_id:                           # NULL 가드
-                # race-safe upsert: INSERT ON CONFLICT UPDATE
+
+            if mob.drop_item_id:
                 stmt = pg_insert(CharacterItem).values(
                     character_id=char.id,
                     item_id=mob.drop_item_id,
@@ -575,7 +550,7 @@ def create_app():
                 )
                 db.session.execute(stmt)
 
-            db.session.commit()                                # === 트랜잭션 끝 ===
+            db.session.commit()
 
         # ── 5. 결과 브로드캐스트 ─────────────────────────────────
         socketio.emit('monster_hit',
@@ -591,10 +566,46 @@ def create_app():
             socketio.emit('monster_despawn',
                         {'id': mob.id},
                         room=f"map_{new_map}")
-        
+
         db.session.commit()
-        latest_map = char.map_key      # char 는 아직 attached 상태
-        update_sid_map(request.sid, latest_map)   # ▼ 2) Redis 갱신
+        update_sid_map(request.sid, char.map_key)
+        return True
+
+    # ② 이동 — outer (같은 타일이면 DB 완전 스킵)
+    @socketio.on('move')
+    def handle_move(data):
+        """같은 타일(128px) 내 이동은 DB 스킵. 타일 변경 시에만 DB 접근."""
+        char_id   = data.get('character_id')
+        new_map   = data.get('map_key')
+        new_px    = data.get('x')
+        new_py    = data.get('y')
+
+        if not char_id or new_px is None or new_py is None or not new_map:
+            return
+
+        # Redis로 sid 검증 (위조 방지)
+        expected_sid = get_sid_by_char(char_id)
+        if expected_sid is not None and expected_sid != request.sid:
+            return
+
+        # 타일 좌표 계산
+        tx = int(new_px // TILE)
+        ty = int(new_py // TILE)
+
+        cached = _last_tile.get(char_id)
+        if cached == (new_map, tx, ty):
+            # 같은 타일 — DB 완전 스킵, 브로드캐스트만
+            now = time.time()
+            if now - last_move_sent.get(char_id, 0) >= 0.12:
+                emit('player_move', {'id': char_id,
+                                    'x': new_px, 'y': new_py},
+                    room=f"map_{new_map}", include_self=False)
+                last_move_sent[char_id] = now
+            return
+
+        # 타일 변경 또는 cache miss → DB 접근
+        if _handle_move_tile_change(char_id, new_map, new_px, new_py, tx, ty):
+            _last_tile[char_id] = (new_map, tx, ty)
 
     # ③ 맵 퇴장 또는 브라우저 종료
     @socketio.on('disconnect')
@@ -613,6 +624,7 @@ def create_app():
             char_id = remove_sid(sid)
             if char_id is None:
                 return
+            _last_tile.pop(int(char_id), None)
 
             # decode_responses=True이므로 이미 문자열
             safe_char_id = str(char_id)

@@ -69,6 +69,8 @@ def socketio_app():
             del sys.modules[mod_name]
 
     mock_redis_inst = MagicMock()
+    mock_redis_inst.hget.return_value = None      # 빈 Redis 시뮬레이션
+    mock_redis_inst.hgetall.return_value = {}
 
     with patch('redis.ConnectionPool.from_url', return_value=MagicMock()), \
          patch('redis.Redis', return_value=mock_redis_inst), \
@@ -173,3 +175,62 @@ def test_move_no_monster_calls_remove(sio_client):
             sc.emit('move', {'character_id': char.id, 'map_key': 'city',
                              'x': 32, 'y': 32})
             spy.assert_called()
+
+
+# ═══════════════════════════════════════════════════════
+# 레이어 C: 타일 기반 DB 스킵 최적화 테스트
+# ═══════════════════════════════════════════════════════
+
+def test_move_same_tile_skips_db_queries(sio_client):
+    """같은 타일 내 연속 이동 → 두 번째는 DB 접근 없이 처리"""
+    sc, app = sio_client
+    from models import db
+    with app.app_context():
+        char = _make_user_and_char('fast_mover', map_key='city')
+        # 첫 이동: cache miss → DB 접근 (_last_tile 세팅)
+        sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                         'x': 32, 'y': 32})
+        # 같은 타일(0,0) 내 두 번째 이동 → DB 스킵
+        with patch.object(db.session, 'get') as mock_get:
+            sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                             'x': 48, 'y': 48})
+            mock_get.assert_not_called()
+
+
+def test_move_tile_change_hits_db(sio_client):
+    """다른 타일로 이동 시 DB 접근 확인"""
+    sc, app = sio_client
+    from models import db
+    with app.app_context():
+        char = _make_user_and_char('tile_changer', map_key='city')
+        # 첫 이동: (32,32) → tile (0,0)
+        sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                         'x': 32, 'y': 32})
+        # 두 번째 이동: (200,200) → tile (1,1) — 다른 타일 → DB 접근
+        with patch.object(db.session, 'get', return_value=char) as mock_get:
+            sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                             'x': 200, 'y': 200})
+            mock_get.assert_called()
+
+
+def test_dead_char_same_tile_hits_db(sio_client):
+    """죽은 캐릭터: _last_tile 무효화 후 같은 타일 이동 → DB 검증 경로"""
+    sc, flask_app = sio_client
+    import app as app_mod
+    from models import db, Character
+    with flask_app.app_context():
+        char = _make_user_and_char('dead_char', map_key='city')
+        char_id = char.id
+        # 첫 이동: cache 세팅
+        sc.emit('move', {'character_id': char_id, 'map_key': 'city',
+                         'x': 32, 'y': 32})
+        # 캐릭터 사망 + _last_tile 무효화
+        char_obj = db.session.get(Character, char_id)
+        char_obj.hp = 0
+        db.session.commit()
+        app_mod._last_tile.pop(char_id, None)
+        # 같은 타일로 이동 → cache miss → DB 검증 경로
+        with patch.object(db.session, 'get', wraps=db.session.get) as spy_get:
+            sc.emit('move', {'character_id': char_id, 'map_key': 'city',
+                             'x': 48, 'y': 48})
+            spy_get.assert_called()  # DB 경로를 탔음
