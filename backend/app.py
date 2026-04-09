@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session   # 타입 힌트용
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from utils.walkable import get_walkable, get_tilemap
+from utils.session import with_db_session
 from random import choice, shuffle
 from typing import Any
 import os
@@ -160,6 +161,7 @@ def create_app():
     # 클라이언트로부터 채팅 메시지 수신 핸들러
     # ──────────────────────────────────────────────────────────
     @socketio.on("chat_message")
+    @with_db_session
     def handle_chat_message(data):
         """
         data = {
@@ -397,6 +399,7 @@ def create_app():
     # ────────────────────────────────────────────────
     # ① 맵 입장
     @socketio.on('join_map')
+    @with_db_session
     def handle_join_map(data):
         sid        = request.sid
         char_id    = data['character_id']
@@ -410,7 +413,6 @@ def create_app():
             db.session.commit()
         cur_map = char.map_key
         char_d  = char.to_dict()
-        db.session.remove()
 
         # 1) 이전 방에서 despawn + leave
         prev_map = get_map_by_sid(sid)
@@ -444,6 +446,7 @@ def create_app():
 
     # ── 몬스터 동기화 요청 (주기적 폴링 대응)
     @socketio.on('request_monsters')
+    @with_db_session
     def handle_request_monsters(data):
         map_key = data.get('map_key')
         if not map_key:
@@ -453,6 +456,7 @@ def create_app():
 
     # ② 이동
     @socketio.on('move')
+    @with_db_session
     def handle_move(data):
         """
         • 플레이어 이동 브로드캐스트
@@ -465,13 +469,11 @@ def create_app():
 
         char: Character = db.session.get(Character, char_id)
         if not char or char.hp <= 0:          # ★ 추가
-            db.session.rollback()
             return
 
         # ───────── NEW ─────────
         if new_px is None or new_py is None:
-            # 잘못된 패킷 → 세션만 정리하고 조용히 무시
-            db.session.rollback()
+            # 잘못된 패킷 → 조용히 무시 (데코레이터가 세션 정리)
             return
         # ───────────────────────
 
@@ -502,7 +504,6 @@ def create_app():
                 .first()
         )
         if not mob:                                        # 충돌 X
-            db.session.rollback()
             return
 
         # ── 2. 데미지 계산 ──────────────────────────────────────
@@ -594,8 +595,6 @@ def create_app():
         db.session.commit()
         latest_map = char.map_key      # char 는 아직 attached 상태
         update_sid_map(request.sid, latest_map)   # ▼ 2) Redis 갱신
-
-        db.session.remove()        # ★ **딱 한 번, 맨 끝에서 세션 해제**
 
     # ③ 맵 퇴장 또는 브라우저 종료
     @socketio.on('disconnect')
