@@ -34,3 +34,35 @@ def test_admin_login_unconfigured(client, monkeypatch):
     })
     assert resp.status_code == 503
     assert 'not configured' in resp.get_json()['error'].lower()
+
+
+def test_admin_session_reports_authenticated_client(admin_client, monkeypatch):
+    monkeypatch.setattr('auth_admin.ADMIN_USERNAME', 'testadmin')
+    resp = admin_client.get('/auth/admin_session')
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data == {
+        'authenticated': True,
+        'admin': True,
+        'username': 'testadmin',
+    }
+
+
+def test_admin_session_reports_unauthenticated_client(client):
+    resp = client.get('/auth/admin_session')
+
+    assert resp.status_code == 401
+    data = resp.get_json()
+    assert data == {
+        'authenticated': False,
+        'admin': False,
+    }
+
+
+def test_admin_logout_clears_session(admin_client):
+    logout_resp = admin_client.post('/auth/admin_logout')
+    session_resp = admin_client.get('/auth/admin_session')
+
+    assert logout_resp.status_code == 200
+    assert session_resp.status_code == 401

@@ -1,10 +1,14 @@
-import { render, screen } from '@testing-library/react'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import PrivateRoute from '../PrivateRoute'
+import * as api from '../api'
 import * as auth from '../auth'
 
+vi.mock('../api', () => ({
+  fetchAdminSession: vi.fn(),
+}))
+
 vi.mock('../auth', () => ({
-  isAdminAuthenticated: vi.fn(),
   setAdminAuthenticated: vi.fn(),
 }))
 
@@ -27,16 +31,49 @@ function renderWithRouter(initialPath: string) {
 }
 
 describe('PrivateRoute', () => {
-  it('renders children when authenticated', () => {
-    vi.mocked(auth.isAdminAuthenticated).mockReturnValue(true)
-    renderWithRouter('/admin/dashboard')
-    expect(screen.getByText('Protected Content')).toBeInTheDocument()
+  beforeEach(() => {
+    vi.clearAllMocks()
   })
 
-  it('redirects to /admin/login when not authenticated', () => {
-    vi.mocked(auth.isAdminAuthenticated).mockReturnValue(false)
+  it('renders children when the admin session is valid', async () => {
+    vi.mocked(api.fetchAdminSession).mockResolvedValue({
+      authenticated: true,
+      admin: true,
+      username: 'admin',
+    })
+
     renderWithRouter('/admin/dashboard')
-    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
-    expect(screen.getByText('Login Page')).toBeInTheDocument()
+
+    expect(screen.getByText('Checking admin session…')).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(screen.getByText('Protected Content')).toBeInTheDocument()
+      expect(auth.setAdminAuthenticated).toHaveBeenCalledWith(true)
+    })
+  })
+
+  it('redirects to /admin/login when the session is missing', async () => {
+    vi.mocked(api.fetchAdminSession).mockResolvedValue({
+      authenticated: false,
+      admin: false,
+    })
+
+    renderWithRouter('/admin/dashboard')
+
+    await waitFor(() => {
+      expect(screen.getByText('Login Page')).toBeInTheDocument()
+      expect(auth.setAdminAuthenticated).toHaveBeenCalledWith(false)
+    })
+  })
+
+  it('shows an error alert when session verification fails', async () => {
+    vi.mocked(api.fetchAdminSession).mockRejectedValue(new Error('server down'))
+
+    renderWithRouter('/admin/dashboard')
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to verify the admin session. Please sign in again.')).toBeInTheDocument()
+      expect(auth.setAdminAuthenticated).toHaveBeenCalledWith(false)
+    })
   })
 })

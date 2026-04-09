@@ -112,10 +112,10 @@ jobs:
         run: docker compose -f docker-compose.ci.yml up -d --wait --wait-timeout 60
 
       - name: Run smoke tests (health check)
-        run: bash scripts/smoke-test.sh | tee smoke-output.txt
+        run: bash -o pipefail -c 'bash scripts/smoke-test.sh | tee smoke-output.txt'
 
       - name: Run integration tests (user flow)
-        run: bash scripts/integration-test.sh | tee integration-output.txt
+        run: bash -o pipefail -c 'bash scripts/integration-test.sh | tee integration-output.txt'
 
       - name: Generate JUnit XML from test results
         if: always()

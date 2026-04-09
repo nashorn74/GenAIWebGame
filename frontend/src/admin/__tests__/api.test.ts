@@ -1,4 +1,23 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+type MockResponse = {
+  ok: boolean
+  status?: number
+  json?: () => Promise<unknown>
+}
+
+function mockFetchSequence(...responses: MockResponse[]) {
+  const fetchMock = vi.fn()
+  responses.forEach((response) => {
+    fetchMock.mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({}),
+      ...response,
+    })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
 
 describe('admin api', () => {
   beforeEach(() => {
@@ -6,408 +25,456 @@ describe('admin api', () => {
     vi.restoreAllMocks()
   })
 
-  // ── Auth ──
-
-  describe('adminLogin', () => {
-    it('returns data on success', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ message: 'ok' }),
-      }))
-      const { adminLogin } = await import('../api')
-      const result = await adminLogin('admin', 'pass')
-      expect(result).toEqual({ message: 'ok' })
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/auth/admin_login')
-      expect(opts.method).toBe('POST')
-      expect(JSON.parse(opts.body)).toEqual({ username: 'admin', password: 'pass' })
+  it('adminLogin posts credentials with cookies included', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => ({ message: 'ok', admin: true }),
     })
 
-    it('throws on failure', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Invalid credentials' }),
-      }))
-      const { adminLogin } = await import('../api')
-      await expect(adminLogin('admin', 'wrong')).rejects.toThrow('Invalid credentials')
+    const { adminLogin } = await import('../api')
+    await expect(adminLogin('admin', 'pass')).resolves.toEqual({ message: 'ok', admin: true })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/admin_login'),
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ username: 'admin', password: 'pass' }),
+      }),
+    )
+  })
+
+  it('adminLogin throws the API error message on failure', async () => {
+    mockFetchSequence({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'Invalid credentials' }),
+    })
+
+    const { adminLogin } = await import('../api')
+    await expect(adminLogin('admin', 'wrong')).rejects.toThrow('Invalid credentials')
+  })
+
+  it('adminLogout posts to the logout endpoint', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => ({ message: 'logged out' }),
+    })
+
+    const { adminLogout } = await import('../api')
+    await expect(adminLogout()).resolves.toEqual({ message: 'logged out' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/admin_logout'),
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    )
+  })
+
+  it('fetchAdminSession returns unauthenticated on 401', async () => {
+    mockFetchSequence({
+      ok: false,
+      status: 401,
+      json: async () => ({ authenticated: false }),
+    })
+
+    const { fetchAdminSession } = await import('../api')
+    await expect(fetchAdminSession()).resolves.toEqual({
+      authenticated: false,
+      admin: false,
     })
   })
 
-  // ── Users ──
+  it('fetchAdminSession throws a fallback error for non-401 failures', async () => {
+    mockFetchSequence({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new Error('broken json')
+      },
+    })
 
-  describe('fetchUsers', () => {
-    it('returns user array', async () => {
-      const mockUsers = [{ id: 1, username: 'user1' }]
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockUsers),
-      }))
-      const { fetchUsers } = await import('../api')
-      const result = await fetchUsers()
-      expect(result).toEqual(mockUsers)
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/users'))
+    const { fetchAdminSession } = await import('../api')
+    await expect(fetchAdminSession()).rejects.toThrow('Failed to verify admin session')
+  })
+
+  it('fetchUsers includes credentials', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => [{ id: 1, username: 'user1' }],
+    })
+
+    const { fetchUsers } = await import('../api')
+    await expect(fetchUsers()).resolves.toEqual([{ id: 1, username: 'user1' }])
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/users'),
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('fetchUserDetail combines user and character requests', async () => {
+    mockFetchSequence(
+      { ok: true, json: async () => ({ id: 1, username: 'user1' }) },
+      { ok: true, json: async () => [{ id: 10, name: 'Hero' }] },
+    )
+
+    const { fetchUserDetail } = await import('../api')
+    await expect(fetchUserDetail(1)).resolves.toEqual({
+      user: { id: 1, username: 'user1' },
+      characters: [{ id: 10, name: 'Hero' }],
     })
   })
 
-  describe('fetchUserDetail', () => {
-    it('returns user and characters', async () => {
-      const mockUser = { id: 1, username: 'user1' }
-      const mockChars = [{ id: 10, name: 'Hero' }]
-      vi.stubGlobal('fetch', vi.fn()
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockUser) })
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockChars) })
-      )
-      const { fetchUserDetail } = await import('../api')
-      const result = await fetchUserDetail(1)
-      expect(result).toEqual({ user: mockUser, characters: mockChars })
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/users/1'))
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/characters?user_id=1'))
+  it('fetchUserDetail throws a not-found error on 404', async () => {
+    mockFetchSequence({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: 'missing' }),
     })
 
-    it('throws on 404', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }))
-      const { fetchUserDetail } = await import('../api')
-      await expect(fetchUserDetail(999)).rejects.toThrow('User detail not found.')
-    })
+    const { fetchUserDetail } = await import('../api')
+    await expect(fetchUserDetail(9)).rejects.toThrow('User detail not found.')
   })
 
-  describe('banUser', () => {
-    it('sends POST to ban endpoint', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ message: 'User banned' }),
-      }))
-      const { banUser } = await import('../api')
-      const result = await banUser(1)
-      expect(result).toEqual({ message: 'User banned' })
+  it('fetchUserDetail throws when loading characters fails', async () => {
+    mockFetchSequence(
+      { ok: true, json: async () => ({ id: 1, username: 'user1' }) },
+      { ok: false, status: 500, json: async () => ({ error: 'boom' }) },
+    )
 
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/users/1/ban')
-      expect(opts.method).toBe('POST')
-    })
-
-    it('throws on failure', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Cannot ban' }),
-      }))
-      const { banUser } = await import('../api')
-      await expect(banUser(1)).rejects.toThrow('Cannot ban')
-    })
+    const { fetchUserDetail } = await import('../api')
+    await expect(fetchUserDetail(1)).rejects.toThrow('Failed to load characters.')
   })
 
-  describe('deleteUser', () => {
-    it('sends DELETE request', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
-      const { deleteUser } = await import('../api')
-      await deleteUser(1)
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/users/1')
-      expect(opts.method).toBe('DELETE')
+  it('banUser surfaces API errors', async () => {
+    mockFetchSequence({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'Cannot ban' }),
     })
 
-    it('throws on failure', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
-      const { deleteUser } = await import('../api')
-      await expect(deleteUser(1)).rejects.toThrow('Failed to delete user')
-    })
+    const { banUser } = await import('../api')
+    await expect(banUser(1)).rejects.toThrow('Cannot ban')
   })
 
-  // ── Characters ──
+  it('deleteUser sends DELETE with credentials', async () => {
+    const fetchMock = mockFetchSequence({ ok: true, status: 204 })
 
-  describe('fetchCharacters', () => {
-    it('returns character array', async () => {
-      const mockChars = [{ id: 1, name: 'Hero', level: 5 }]
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockChars),
-      }))
-      const { fetchCharacters } = await import('../api')
-      const result = await fetchCharacters()
-      expect(result).toEqual(mockChars)
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/characters'))
-    })
+    const { deleteUser } = await import('../api')
+    await deleteUser(1)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/users/1'),
+      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+    )
   })
 
-  describe('fetchCharacterDetail', () => {
-    it('returns character detail', async () => {
-      const mockChar = { id: 1, name: 'Hero', level: 10 }
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockChar),
-      }))
-      const { fetchCharacterDetail } = await import('../api')
-      const result = await fetchCharacterDetail(1)
-      expect(result).toEqual(mockChar)
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/characters/1'))
+  it('fetchCharacters includes credentials', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => [{ id: 1, name: 'Hero' }],
     })
 
-    it('throws on 404', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }))
-      const { fetchCharacterDetail } = await import('../api')
-      await expect(fetchCharacterDetail(999)).rejects.toThrow('Character detail not found.')
-    })
+    const { fetchCharacters } = await import('../api')
+    await expect(fetchCharacters()).resolves.toEqual([{ id: 1, name: 'Hero' }])
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/characters'),
+      expect.objectContaining({ credentials: 'include' }),
+    )
   })
 
-  describe('gainExp', () => {
-    it('sends PATCH with amount', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ message: 'ok', character: { id: 1, level: 6 } }),
-      }))
-      const { gainExp } = await import('../api')
-      const result = await gainExp(1, 150)
-      expect(result.message).toBe('ok')
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/characters/1/gain_exp')
-      expect(opts.method).toBe('PATCH')
-      expect(JSON.parse(opts.body)).toEqual({ amount: 150 })
+  it('fetchCharacterDetail throws a not-found message on 404', async () => {
+    mockFetchSequence({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: 'missing' }),
     })
 
-    it('throws on failure', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Not enough' }),
-      }))
-      const { gainExp } = await import('../api')
-      await expect(gainExp(1, 150)).rejects.toThrow('Not enough')
-    })
+    const { fetchCharacterDetail } = await import('../api')
+    await expect(fetchCharacterDetail(999)).rejects.toThrow('Character detail not found.')
   })
 
-  describe('deleteCharacter', () => {
-    it('sends DELETE request', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
-      const { deleteCharacter } = await import('../api')
-      await deleteCharacter(1)
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/characters/1')
-      expect(opts.method).toBe('DELETE')
+  it('gainExp posts the amount payload', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => ({ message: 'ok', character: { id: 1, level: 6 } }),
     })
+
+    const { gainExp } = await import('../api')
+    await gainExp(1, 150)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/characters/1/gain_exp'),
+      expect.objectContaining({
+        method: 'PATCH',
+        credentials: 'include',
+        body: JSON.stringify({ amount: 150 }),
+      }),
+    )
   })
 
-  // ── Items ──
-
-  describe('fetchItems', () => {
-    it('fetches all items without category', async () => {
-      const mockItems = [{ id: 1, name: 'Sword' }]
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockItems),
-      }))
-      const { fetchItems } = await import('../api')
-      const result = await fetchItems()
-      expect(result).toEqual(mockItems)
-      expect((fetch as any).mock.calls[0][0]).not.toContain('?category=')
+  it('gainExp surfaces API errors', async () => {
+    mockFetchSequence({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'Invalid exp amount' }),
     })
 
-    it('fetches items with category filter', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve([]),
-      }))
-      const { fetchItems } = await import('../api')
-      await fetchItems('potion')
-      expect((fetch as any).mock.calls[0][0]).toContain('?category=potion')
-    })
+    const { gainExp } = await import('../api')
+    await expect(gainExp(1, -1)).rejects.toThrow('Invalid exp amount')
   })
 
-  describe('createItem', () => {
-    it('sends POST with payload', async () => {
-      const payload = { name: 'Potion', category: 'potion', buy_price: 50 }
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ id: 1, ...payload }),
-      }))
-      const { createItem } = await import('../api')
-      const result = await createItem(payload)
-      expect(result.name).toBe('Potion')
+  it('deleteCharacter sends DELETE with credentials', async () => {
+    const fetchMock = mockFetchSequence({ ok: true, status: 204 })
 
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/items')
-      expect(opts.method).toBe('POST')
-      expect(JSON.parse(opts.body)).toEqual(payload)
-    })
+    const { deleteCharacter } = await import('../api')
+    await deleteCharacter(8)
 
-    it('throws on failure', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Duplicate name' }),
-      }))
-      const { createItem } = await import('../api')
-      await expect(createItem({ name: 'Dup' })).rejects.toThrow('Duplicate name')
-    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/characters/8'),
+      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+    )
   })
 
-  describe('updateItem', () => {
-    it('sends PUT with payload', async () => {
-      const payload = { name: 'Big Potion', buy_price: 100 }
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ id: 1, ...payload }),
-      }))
-      const { updateItem } = await import('../api')
-      await updateItem(1, payload)
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/items/1')
-      expect(opts.method).toBe('PUT')
-      expect(JSON.parse(opts.body)).toEqual(payload)
+  it('fetchItems appends the category query string when provided', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => [],
     })
+
+    const { fetchItems } = await import('../api')
+    await fetchItems('potion')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/items?category=potion'),
+      expect.objectContaining({ credentials: 'include' }),
+    )
   })
 
-  describe('deleteItem', () => {
-    it('sends DELETE request', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
-      const { deleteItem } = await import('../api')
-      await deleteItem(5)
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/items/5')
-      expect(opts.method).toBe('DELETE')
+  it('createItem posts JSON payload', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => ({ id: 1, name: 'Potion' }),
     })
+
+    const { createItem } = await import('../api')
+    await createItem({ name: 'Potion' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/items'),
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ name: 'Potion' }),
+      }),
+    )
   })
 
-  // ── Maps ──
-
-  describe('fetchMaps', () => {
-    it('returns map array', async () => {
-      const mockMaps = [{ key: 'worldmap', display_name: 'World' }]
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockMaps),
-      }))
-      const { fetchMaps } = await import('../api')
-      const result = await fetchMaps()
-      expect(result).toEqual(mockMaps)
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/maps'))
+  it('createItem surfaces API errors', async () => {
+    mockFetchSequence({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'Item name is required' }),
     })
+
+    const { createItem } = await import('../api')
+    await expect(createItem({})).rejects.toThrow('Item name is required')
   })
 
-  describe('createMap', () => {
-    it('sends POST with payload', async () => {
-      const payload = { key: 'dungeon1', display_name: 'Dungeon' }
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(payload),
-      }))
-      const { createMap } = await import('../api')
-      await createMap(payload)
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/maps')
-      expect(opts.method).toBe('POST')
-      expect(JSON.parse(opts.body)).toEqual(payload)
+  it('updateItem sends PUT with the payload', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => ({ item: { id: 3, name: 'Hi-Potion' } }),
     })
+
+    const { updateItem } = await import('../api')
+    await updateItem(3, { name: 'Hi-Potion' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/items/3'),
+      expect.objectContaining({
+        method: 'PUT',
+        credentials: 'include',
+        body: JSON.stringify({ name: 'Hi-Potion' }),
+      }),
+    )
   })
 
-  describe('updateMap', () => {
-    it('sends PUT with key in URL', async () => {
-      const payload = { display_name: 'Updated World' }
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ key: 'worldmap', ...payload }),
-      }))
-      const { updateMap } = await import('../api')
-      await updateMap('worldmap', payload)
+  it('deleteItem sends DELETE with credentials', async () => {
+    const fetchMock = mockFetchSequence({ ok: true, status: 204 })
 
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/maps/worldmap')
-      expect(opts.method).toBe('PUT')
-    })
+    const { deleteItem } = await import('../api')
+    await deleteItem(4)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/items/4'),
+      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+    )
   })
 
-  describe('deleteMap', () => {
-    it('sends DELETE with key in URL', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
-      const { deleteMap } = await import('../api')
-      await deleteMap('dungeon1')
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/maps/dungeon1')
-      expect(opts.method).toBe('DELETE')
+  it('fetchMaps includes credentials', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => [{ key: 'worldmap' }],
     })
 
-    it('throws on failure', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Map in use' }),
-      }))
-      const { deleteMap } = await import('../api')
-      await expect(deleteMap('worldmap')).rejects.toThrow('Map in use')
-    })
+    const { fetchMaps } = await import('../api')
+    await expect(fetchMaps()).resolves.toEqual([{ key: 'worldmap' }])
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/maps'),
+      expect.objectContaining({ credentials: 'include' }),
+    )
   })
 
-  // ── NPCs ──
-
-  describe('fetchNPCs', () => {
-    it('returns NPC array', async () => {
-      const mockNPCs = [{ id: 1, name: 'Guard' }]
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockNPCs),
-      }))
-      const { fetchNPCs } = await import('../api')
-      const result = await fetchNPCs()
-      expect(result).toEqual(mockNPCs)
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/npcs'))
+  it('createMap posts JSON payload', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => ({ map: { key: 'city2' } }),
     })
+
+    const { createMap } = await import('../api')
+    await createMap({ key: 'city2', display_name: 'City 2' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/maps'),
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ key: 'city2', display_name: 'City 2' }),
+      }),
+    )
   })
 
-  describe('createNPC', () => {
-    it('sends POST with payload', async () => {
-      const payload = { name: 'Merchant', npc_type: 'shop', map_key: 'city' }
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ id: 1, ...payload }),
-      }))
-      const { createNPC } = await import('../api')
-      await createNPC(payload)
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/npcs')
-      expect(opts.method).toBe('POST')
-      expect(JSON.parse(opts.body)).toEqual(payload)
+  it('updateMap sends PUT with the payload', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => ({ map: { key: 'city2' } }),
     })
+
+    const { updateMap } = await import('../api')
+    await updateMap('city2', { display_name: 'Capital City' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/maps/city2'),
+      expect.objectContaining({
+        method: 'PUT',
+        credentials: 'include',
+        body: JSON.stringify({ display_name: 'Capital City' }),
+      }),
+    )
   })
 
-  describe('updateNPC', () => {
-    it('sends PUT with id in URL', async () => {
-      const payload = { name: 'Updated Guard' }
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ id: 1, ...payload }),
-      }))
-      const { updateNPC } = await import('../api')
-      await updateNPC(1, payload)
+  it('deleteMap sends DELETE with credentials', async () => {
+    const fetchMock = mockFetchSequence({ ok: true, status: 204 })
 
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/npcs/1')
-      expect(opts.method).toBe('PUT')
-    })
+    const { deleteMap } = await import('../api')
+    await deleteMap('city2')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/maps/city2'),
+      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+    )
   })
 
-  describe('deleteNPC', () => {
-    it('sends DELETE request', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
-      const { deleteNPC } = await import('../api')
-      await deleteNPC(3)
-
-      const [url, opts] = (fetch as any).mock.calls[0]
-      expect(url).toContain('/api/npcs/3')
-      expect(opts.method).toBe('DELETE')
+  it('fetchNPCs includes credentials', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => [{ id: 5, name: 'Merchant' }],
     })
 
-    it('throws on failure', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: false,
-        json: () => Promise.resolve({ error: 'NPC not found' }),
-      }))
-      const { deleteNPC } = await import('../api')
-      await expect(deleteNPC(999)).rejects.toThrow('NPC not found')
+    const { fetchNPCs } = await import('../api')
+    await expect(fetchNPCs()).resolves.toEqual([{ id: 5, name: 'Merchant' }])
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/npcs'),
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('createNPC posts JSON payload', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => ({ npc: { id: 2, name: 'Guide' } }),
+    })
+
+    const { createNPC } = await import('../api')
+    await createNPC({ name: 'Guide', map_key: 'city2' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/npcs'),
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ name: 'Guide', map_key: 'city2' }),
+      }),
+    )
+  })
+
+  it('createNPC surfaces API errors', async () => {
+    mockFetchSequence({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'NPC name is required' }),
+    })
+
+    const { createNPC } = await import('../api')
+    await expect(createNPC({})).rejects.toThrow('NPC name is required')
+  })
+
+  it('updateNPC sends PUT with the payload', async () => {
+    const fetchMock = mockFetchSequence({
+      ok: true,
+      json: async () => ({ npc: { id: 9, name: 'Guardian' } }),
+    })
+
+    const { updateNPC } = await import('../api')
+    await updateNPC(9, { name: 'Guardian' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/npcs/9'),
+      expect.objectContaining({
+        method: 'PUT',
+        credentials: 'include',
+        body: JSON.stringify({ name: 'Guardian' }),
+      }),
+    )
+  })
+
+  it('deleteNPC sends DELETE with credentials', async () => {
+    const fetchMock = mockFetchSequence({ ok: true, status: 204 })
+
+    const { deleteNPC } = await import('../api')
+    await deleteNPC(9)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/npcs/9'),
+      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+    )
+  })
+
+  it('fetchAdminOverview aggregates counts from admin resources', async () => {
+    mockFetchSequence(
+      { ok: true, json: async () => [{ id: 1, status: 'active' }, { id: 2, status: 'banned' }] },
+      { ok: true, json: async () => [{ id: 10, level: 12 }, { id: 11, level: 4 }] },
+      { ok: true, json: async () => [{ id: 100, category: 'potion' }, { id: 101, category: 'weapon' }] },
+      { ok: true, json: async () => [{ key: 'worldmap' }] },
+      { ok: true, json: async () => [{ id: 50, is_active: true, npc_type: 'shop' }, { id: 51, is_active: false, npc_type: 'normal' }] },
+    )
+
+    const { fetchAdminOverview } = await import('../api')
+    await expect(fetchAdminOverview()).resolves.toEqual({
+      totalUsers: 2,
+      bannedUsers: 1,
+      totalCharacters: 2,
+      highLevelCharacters: 1,
+      totalItems: 2,
+      potionItems: 1,
+      totalMaps: 1,
+      totalNPCs: 2,
+      activeNPCs: 1,
+      shopNPCs: 1,
     })
   })
 })

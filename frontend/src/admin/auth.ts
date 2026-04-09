@@ -1,13 +1,14 @@
-// src/admin/auth.ts
+const ADMIN_AUTH_KEY = 'arkacia_admin_authenticated'
+
 export function isAdminAuthenticated(): boolean {
-    return localStorage.getItem('isAdminLoggedIn') === 'true'
+  return localStorage.getItem(ADMIN_AUTH_KEY) === 'true'
+}
+
+export function setAdminAuthenticated(value: boolean) {
+  if (value) {
+    localStorage.setItem(ADMIN_AUTH_KEY, 'true')
+    return
   }
-  
-  export function setAdminAuthenticated(value: boolean) {
-    if (value) {
-      localStorage.setItem('isAdminLoggedIn', 'true')
-    } else {
-      localStorage.removeItem('isAdminLoggedIn')
-    }
-  }
+  localStorage.removeItem(ADMIN_AUTH_KEY)
+}
   

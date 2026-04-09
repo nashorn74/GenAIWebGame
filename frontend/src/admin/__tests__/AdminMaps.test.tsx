@@ -18,6 +18,7 @@ const mockMaps = [
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.fetchMaps).mockResolvedValue(mockMaps)
+  vi.spyOn(window, 'alert').mockImplementation(() => {})
 })
 
 describe('AdminMaps', () => {
