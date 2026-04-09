@@ -583,9 +583,9 @@ def create_app():
         if not char_id or new_px is None or new_py is None or not new_map:
             return
 
-        # Redis로 sid 검증 (위조 방지)
+        # Redis로 sid 검증 (fail-closed: 매핑 없으면 차단)
         expected_sid = get_sid_by_char(char_id)
-        if expected_sid is not None and expected_sid != request.sid:
+        if not expected_sid or expected_sid != request.sid:
             return
 
         # 타일 좌표 계산

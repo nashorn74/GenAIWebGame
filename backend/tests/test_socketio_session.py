@@ -93,11 +93,15 @@ def socketio_app():
 
 @pytest.fixture()
 def sio_client(socketio_app):
-    """socketio.test_client 생성"""
+    """socketio.test_client 생성 + sid 검증 자동 통과 설정"""
     app, sio = socketio_app
     client = app.test_client()
     sc = sio.test_client(app, flask_test_client=client)
-    return sc, app
+    # fail-closed sid 검증 지원: 핸들러 내에서 request.sid 반환
+    from flask import request as flask_req
+    with patch('app.get_sid_by_char',
+               side_effect=lambda cid: getattr(flask_req, 'sid', None)):
+        yield sc, app
 
 
 def _make_user_and_char(name='tester', map_key='city'):
@@ -214,7 +218,7 @@ def test_move_tile_change_hits_db(sio_client):
 
 
 def test_dead_char_same_tile_hits_db(sio_client):
-    """죽은 캐릭터: _last_tile 무효화 후 같은 타일 이동 → DB 검증 경로"""
+    """죽은 캐릭터: _last_tile 무효화 후 같은 타일 이동 → DB 검증 + 브로드캐스트 차단"""
     sc, flask_app = sio_client
     import app as app_mod
     from models import db, Character
@@ -224,6 +228,7 @@ def test_dead_char_same_tile_hits_db(sio_client):
         # 첫 이동: cache 세팅
         sc.emit('move', {'character_id': char_id, 'map_key': 'city',
                          'x': 32, 'y': 32})
+        assert char_id in app_mod._last_tile  # cache 세팅 확인
         # 캐릭터 사망 + _last_tile 무효화
         char_obj = db.session.get(Character, char_id)
         char_obj.hp = 0
@@ -234,3 +239,35 @@ def test_dead_char_same_tile_hits_db(sio_client):
             sc.emit('move', {'character_id': char_id, 'map_key': 'city',
                              'x': 48, 'y': 48})
             spy_get.assert_called()  # DB 경로를 탔음
+        # inner가 False 반환 → _last_tile 미갱신 (브로드캐스트 차단 보장)
+        assert char_id not in app_mod._last_tile
+
+
+# ═══════════════════════════════════════════════════════
+# 레이어 D: Redis sid 검증 테스트
+# ═══════════════════════════════════════════════════════
+
+def test_move_spoofed_sid_rejected(sio_client):
+    """위조된 sid로 move 전송 시 DB 접근 없이 차단"""
+    sc, app = sio_client
+    from models import db
+    with app.app_context():
+        char = _make_user_and_char('victim', map_key='city')
+        with patch('app.get_sid_by_char', return_value='fake_sid_12345'):
+            with patch.object(db.session, 'get') as mock_get:
+                sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                                 'x': 32, 'y': 32})
+                mock_get.assert_not_called()  # DB 접근 없이 차단
+
+
+def test_move_no_redis_mapping_rejected(sio_client):
+    """Redis에 sid 매핑 없는 캐릭터의 move 이벤트 차단"""
+    sc, app = sio_client
+    from models import db
+    with app.app_context():
+        char = _make_user_and_char('unregistered', map_key='city')
+        with patch('app.get_sid_by_char', return_value=None):
+            with patch.object(db.session, 'get') as mock_get:
+                sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                                 'x': 32, 'y': 32})
+                mock_get.assert_not_called()  # DB 접근 없이 차단
