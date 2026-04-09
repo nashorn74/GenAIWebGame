@@ -117,6 +117,28 @@ def _make_user_and_char(name='tester', map_key='city'):
     return char
 
 
+def _make_monster(map_key='city', x=0, y=0, hp=20):
+    """테스트용 몬스터 생성."""
+    from models import db, Monster
+    mob = Monster(
+        name=f"Mob_{map_key}_{x}_{y}",
+        species="Slime",
+        map_key=map_key,
+        x=x,
+        y=y,
+        hp=hp,
+        max_hp=hp,
+        attack=5,
+        defense=0,
+        spawn_x=x,
+        spawn_y=y,
+        is_alive=True,
+    )
+    db.session.add(mob)
+    db.session.commit()
+    return mob
+
+
 def test_chat_message_calls_remove(sio_client):
     """chat_message: emit 후 db.session.remove() 호출"""
     sc, app = sio_client
@@ -199,6 +221,28 @@ def test_move_same_tile_skips_db_queries(sio_client):
             sc.emit('move', {'character_id': char.id, 'map_key': 'city',
                              'x': 48, 'y': 48})
             mock_get.assert_not_called()
+
+
+def test_move_same_tile_with_monster_hits_db_and_combat(sio_client):
+    """같은 타일이어도 몬스터가 점유 중이면 DB/전투 경로를 다시 탄다."""
+    sc, app = sio_client
+    import app as app_mod
+    from models import db, Monster
+    with app.app_context():
+        char = _make_user_and_char('fighter', map_key='city')
+        sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                         'x': 32, 'y': 32})
+        mob = _make_monster(map_key='city', x=0, y=0, hp=20)
+        mob_id = mob.id
+        app_mod._monster_tiles_by_map['city'] = {(0, 0)}
+
+        with patch.object(db.session, 'get', wraps=db.session.get) as spy_get:
+            sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                             'x': 48, 'y': 48})
+            spy_get.assert_called()
+
+        refreshed = db.session.get(Monster, mob_id)
+        assert refreshed.hp < 20
 
 
 def test_move_tile_change_hits_db(sio_client):

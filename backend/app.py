@@ -29,6 +29,7 @@ import redis                     # ▸ pip install redis
 knockback_until: dict[int, float] = {}   # {monster_id: unix_timestamp}
 last_move_sent: dict[int, float] = {}   # {char_id: unix_ts}
 _last_tile: dict[int, tuple[str, int, int]] = {}   # {char_id: (map_key, tx, ty)}
+_monster_tiles_by_map: dict[str, set[tuple[int, int]]] = {}   # {map_key: {(tx, ty), ...}}
 
 # ---------------------------------------------
 # redis 연결
@@ -108,6 +109,19 @@ def get_layer(map_key:str):
         _, layer = get_tilemap(map_key)   # layer.data → 2-D list
         tilemaps[map_key] = layer
     return tilemaps[map_key]              # SimpleNamespace
+
+
+def set_monster_tiles(map_key: str, monsters: list[Monster]) -> None:
+    _monster_tiles_by_map[map_key] = {
+        (m.x, m.y) for m in monsters if m.is_alive
+    }
+
+
+def update_monster_tile(map_key: str, old_tile: tuple[int, int], new_tile: tuple[int, int] | None) -> None:
+    tiles = _monster_tiles_by_map.setdefault(map_key, set())
+    tiles.discard(old_tile)
+    if new_tile is not None:
+        tiles.add(new_tile)
 
 def create_app():
     app = Flask(__name__)
@@ -375,6 +389,7 @@ def create_app():
                                 'id': m.id, 'x': m.x, 'y': m.y
                             }, room=f'map_{m.map_key}')
 
+                    set_monster_tiles('dungeon1', mobs)
                     db.session.commit()
             except Exception:
                 app.logger.exception(
@@ -433,6 +448,7 @@ def create_app():
         # 3) 자기 자신에게 초기 상태 푸시
         players  = Character.query.filter_by(map_key=cur_map).all()
         monsters = Monster.query.filter_by(map_key=cur_map, is_alive=True).all()
+        set_monster_tiles(cur_map, monsters)
         emit('current_players',  [p.to_dict() for p in players],  to=sid)
         emit('current_monsters', [m.to_dict() for m in monsters], to=sid)
 
@@ -455,6 +471,7 @@ def create_app():
         if not map_key:
             return
         monsters = Monster.query.filter_by(map_key=map_key, is_alive=True).all()
+        set_monster_tiles(map_key, monsters)
         emit('current_monsters', [m.to_dict() for m in monsters])
 
     # ② 이동 — inner (타일 변경 시에만 DB 접근)
@@ -486,6 +503,7 @@ def create_app():
                 .first()
         )
         if not mob:
+            update_monster_tile(new_map, (tx, ty), None)
             update_sid_map(request.sid, char.map_key)
             return True
 
@@ -552,6 +570,11 @@ def create_app():
                 db.session.execute(stmt)
 
             db.session.commit()
+            update_monster_tile(new_map, (tx, ty), None)
+        elif (mob.x, mob.y) != (tx, ty):
+            update_monster_tile(new_map, (tx, ty), (mob.x, mob.y))
+        else:
+            update_monster_tile(new_map, (tx, ty), (tx, ty))
 
         # ── 5. 결과 브로드캐스트 ─────────────────────────────────
         socketio.emit('monster_hit',
@@ -595,7 +618,7 @@ def create_app():
         ty = int(new_py // TILE)
 
         cached = _last_tile.get(char_id)
-        if cached == (new_map, tx, ty):
+        if cached == (new_map, tx, ty) and (tx, ty) not in _monster_tiles_by_map.get(new_map, set()):
             # 같은 타일 — DB 완전 스킵, 브로드캐스트만
             now = time.time()
             if now - last_move_sent.get(char_id, 0) >= 0.12:

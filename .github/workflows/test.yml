@@ -123,6 +123,22 @@ jobs:
           docker compose -f docker-compose.ci.yml rm -f backend
           DB_POOL_SIZE=1 DB_MAX_OVERFLOW=0 DB_POOL_TIMEOUT=1 \
             docker compose -f docker-compose.ci.yml up -d --wait --wait-timeout 60 backend
+          for i in $(seq 1 30); do
+            if docker compose -f docker-compose.ci.yml exec -T backend \
+              python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/maps')"; then
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "backend health check failed after constrained restart" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Install backend dev dependencies for load test
+        run: |
+          docker compose -f docker-compose.ci.yml exec -T backend \
+            pip install -r requirements-dev.txt
 
       - name: Run lightweight Socket.IO load test
         run: |
