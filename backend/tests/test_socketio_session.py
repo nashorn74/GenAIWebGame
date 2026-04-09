@@ -8,6 +8,64 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 
+class FakeRedisPipeline:
+    def __init__(self, redis_client):
+        self.redis_client = redis_client
+        self.ops = []
+
+    def hget(self, key, field):
+        self.ops.append(("hget", key, field))
+        return self.redis_client.hget(key, field)
+
+    def hset(self, key, field, value):
+        self.ops.append(("hset", key, field, value))
+        return self
+
+    def hdel(self, key, field):
+        self.ops.append(("hdel", key, field))
+        return self
+
+    def execute(self):
+        for op in self.ops:
+            action = op[0]
+            if action == "hset":
+                _, key, field, value = op
+                self.redis_client.hset(key, field, value)
+            elif action == "hdel":
+                _, key, field = op
+                self.redis_client.hdel(key, field)
+        self.ops.clear()
+        return []
+
+
+class FakeRedis:
+    def __init__(self):
+        self.hashes = {}
+
+    def hget(self, key, field):
+        return self.hashes.get(key, {}).get(str(field))
+
+    def hset(self, key, field, value):
+        self.hashes.setdefault(key, {})[str(field)] = value
+        return 1
+
+    def hdel(self, key, field):
+        bucket = self.hashes.get(key, {})
+        return 1 if bucket.pop(str(field), None) is not None else 0
+
+    def hgetall(self, key):
+        return dict(self.hashes.get(key, {}))
+
+    def pipeline(self):
+        return FakeRedisPipeline(self)
+
+    def publish(self, channel, message):
+        return 1
+
+    def pubsub(self, **kwargs):
+        return MagicMock()
+
+
 # ═══════════════════════════════════════════════════════
 # 레이어 A: with_db_session 데코레이터 단위 테스트
 # ═══════════════════════════════════════════════════════
@@ -68,9 +126,7 @@ def socketio_app():
         if mod_name == 'app' or mod_name.startswith('app.'):
             del sys.modules[mod_name]
 
-    mock_redis_inst = MagicMock()
-    mock_redis_inst.hget.return_value = None      # 빈 Redis 시뮬레이션
-    mock_redis_inst.hgetall.return_value = {}
+    mock_redis_inst = FakeRedis()
 
     with patch('redis.ConnectionPool.from_url', return_value=MagicMock()), \
          patch('redis.Redis', return_value=mock_redis_inst), \
@@ -84,10 +140,12 @@ def socketio_app():
         app, sio = create_app()
 
     app.config['TESTING'] = True
+    app.fake_redis = mock_redis_inst
     from models import db
     with app.app_context():
         db.create_all()
         yield app, sio
+        db.session.remove()
         db.drop_all()
 
 
@@ -102,6 +160,15 @@ def sio_client(socketio_app):
     with patch('app.get_sid_by_char',
                side_effect=lambda cid: getattr(flask_req, 'sid', None)):
         yield sc, app
+
+
+@pytest.fixture()
+def raw_sio_client(socketio_app):
+    """실제 Redis sid 바인딩 흐름을 검증하는 socketio.test_client."""
+    app, sio = socketio_app
+    client = app.test_client()
+    sc = sio.test_client(app, flask_test_client=client)
+    yield sc, app
 
 
 def _make_user_and_char(name='tester', map_key='city'):
@@ -168,6 +235,26 @@ def test_join_map_normal_calls_remove(sio_client):
         with patch.object(db.session, 'remove', wraps=db.session.remove) as spy:
             sc.emit('join_map', {'character_id': char.id, 'map_key': 'city'})
             spy.assert_called()
+
+
+def test_join_map_binds_sid_and_allows_move(raw_sio_client):
+    """join_map이 Redis sid를 바인딩하면 후속 move가 실제 검증을 통과한다."""
+    sc, app = raw_sio_client
+    import app as app_mod
+    from models import db
+    with app.app_context():
+        char = _make_user_and_char('bound_joiner')
+
+        sc.emit('join_map', {'character_id': char.id, 'map_key': 'city'})
+
+        bound_sid = app.fake_redis.hget(app_mod.K_CHAR_TO_SID, char.id)
+        assert bound_sid
+        assert app.fake_redis.hget(app_mod.K_SID_TO_MAP, bound_sid) == 'city'
+
+        with patch.object(db.session, 'get', wraps=db.session.get) as spy_get:
+            sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                             'x': 32, 'y': 32})
+            spy_get.assert_called()
 
 
 def test_request_monsters_calls_remove(sio_client):
@@ -243,6 +330,26 @@ def test_move_same_tile_with_monster_hits_db_and_combat(sio_client):
 
         refreshed = db.session.get(Monster, mob_id)
         assert refreshed.hp < 20
+
+
+def test_move_same_tile_no_monster_skips_db_even_on_combat_map(sio_client):
+    """맵에 몬스터가 있어도, 해당 타일에 없으면 fast-path(DB 스킵) 정상 적용."""
+    sc, app = sio_client
+    import app as app_mod
+    from models import db
+    with app.app_context():
+        char = _make_user_and_char('careful_mover', map_key='city')
+        _make_monster(map_key='city', x=4, y=4, hp=20)
+        app_mod._monster_tiles_by_map['city'] = {(4, 4)}
+
+        # 첫 이동: cache miss → DB 경로 (tile 0,0 — 몬스터 없음)
+        sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                         'x': 32, 'y': 32})
+        # 같은 타일 두 번째 이동 → 타일에 몬스터 없으므로 fast-path
+        with patch.object(db.session, 'get') as mock_get:
+            sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                             'x': 48, 'y': 48})
+            mock_get.assert_not_called()  # fast-path: DB 접근 없음
 
 
 def test_move_tile_change_hits_db(sio_client):

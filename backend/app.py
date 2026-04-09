@@ -596,6 +596,25 @@ def create_app():
         # 몬스터 전투 발생 → 캐시 금지 (같은 타일 재진입 시 다시 DB 경로)
         return False
 
+    # ── handle_move 디버그 카운터 (rate-limited 출력) ──
+    _move_debug: dict[str, int] = {}       # 카운터
+    _move_debug_ts: list[float] = [0.0]    # 마지막 출력 시각
+
+    def flush_move_debug(now: float | None = None) -> None:
+        if not _move_debug:
+            return
+        if now is None:
+            now = time.time()
+        if now - _move_debug_ts[0] < 5.0:
+            return
+        _move_debug_ts[0] = now
+        print(
+            f"[move_debug] {_move_debug}  "
+            f"monster_tiles={dict((k, len(v)) for k, v in _monster_tiles_by_map.items())}",
+            flush=True,
+        )
+        _move_debug.clear()
+
     # ② 이동 — outer (같은 타일이면 DB 완전 스킵)
     @socketio.on('move')
     def handle_move(data):
@@ -606,11 +625,15 @@ def create_app():
         new_py    = data.get('y')
 
         if not char_id or new_px is None or new_py is None or not new_map:
+            _move_debug['bad_data'] = _move_debug.get('bad_data', 0) + 1
+            flush_move_debug()
             return
 
         # Redis로 sid 검증 (fail-closed: 매핑 없으면 차단)
         expected_sid = get_sid_by_char(char_id)
         if not expected_sid or expected_sid != request.sid:
+            _move_debug['sid_reject'] = _move_debug.get('sid_reject', 0) + 1
+            flush_move_debug()
             return
 
         # 타일 좌표 계산
@@ -618,19 +641,29 @@ def create_app():
         ty = int(new_py // TILE)
 
         cached = _last_tile.get(char_id)
-        if cached == (new_map, tx, ty) and (tx, ty) not in _monster_tiles_by_map.get(new_map, set()):
-            # 같은 타일 — DB 완전 스킵, 브로드캐스트만
+        # 같은 타일 + 해당 타일에 몬스터 없음 → fast-path (DB 완전 스킵)
+        if (
+            cached == (new_map, tx, ty)
+            and (tx, ty) not in _monster_tiles_by_map.get(new_map, set())
+        ):
             now = time.time()
             if now - last_move_sent.get(char_id, 0) >= 0.12:
                 emit('player_move', {'id': char_id,
                                     'x': new_px, 'y': new_py},
                     room=f"map_{new_map}", include_self=False)
                 last_move_sent[char_id] = now
+            _move_debug['fast_path'] = _move_debug.get('fast_path', 0) + 1
+            flush_move_debug(now)
             return
 
         # 타일 변경 또는 cache miss → DB 접근
         if _handle_move_tile_change(char_id, new_map, new_px, new_py, tx, ty):
             _last_tile[char_id] = (new_map, tx, ty)
+        _move_debug['db_path'] = _move_debug.get('db_path', 0) + 1
+
+        # 5초에 한 번 디버그 카운터 출력
+        now = time.time()
+        flush_move_debug(now)
 
     # ③ 맵 퇴장 또는 브라우저 종료
     @socketio.on('disconnect')
