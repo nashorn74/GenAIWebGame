@@ -54,17 +54,26 @@ K_CHAR_TO_SID = "char_to_sid"    # HSET char_id -> sid
 K_SID_TO_MAP  = "sid_to_map"     # HSET sid -> map_key
 
 # ─── 편의 함수 ──────────────────────────
+def _redis_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
+
 def get_sid_by_char(char_id: int) -> str | None:
-    return r.hget(K_CHAR_TO_SID, char_id)
+    return _redis_text(r.hget(K_CHAR_TO_SID, char_id))
 
 def get_map_by_sid(sid: str) -> str | None:
-    return r.hget(K_SID_TO_MAP, sid)
+    return _redis_text(r.hget(K_SID_TO_MAP, sid))
 
 def bind_char_sid(char_id: int, sid: str, map_key: str):
     """(1) 같은 char로 열린 기존 세션 정리 → (2) 새 sid 바인드"""
+    sid = str(sid)
+    map_key = str(map_key)
     pipe = r.pipeline()
     # ① 기존 sid 있으면 두 해시 모두에서 제거
-    old_sid = r.hget(K_CHAR_TO_SID, char_id)
+    old_sid = get_sid_by_char(char_id)
     if old_sid:
         pipe.hdel(K_SID_TO_MAP, old_sid)
     # ② 새 매핑
@@ -77,10 +86,11 @@ def bind_char_sid(char_id: int, sid: str, map_key: str):
     )
 
 def update_sid_map(sid: str, map_key: str):
-    r.hset(K_SID_TO_MAP, sid, map_key)
+    r.hset(K_SID_TO_MAP, str(sid), str(map_key))
 
 def remove_sid(sid: str):
     """disconnect 때 호출: hash 2 곳 모두 clean + char_id 반환 (없으면 None)"""
+    sid = str(sid)
     old_map = get_map_by_sid(sid)
     pipe = r.pipeline()
     # sid -> map 해시에서 pop
@@ -88,7 +98,7 @@ def remove_sid(sid: str):
     # char_to_sid 해시에서 역-검색
     found_cid = None
     for cid, stored in r.hgetall(K_CHAR_TO_SID).items():
-        if stored == sid:
+        if _redis_text(stored) == sid:
             found_cid = int(cid)
             pipe.hdel(K_CHAR_TO_SID, cid)
             break

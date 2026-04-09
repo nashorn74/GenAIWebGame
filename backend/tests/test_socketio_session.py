@@ -455,6 +455,26 @@ def test_move_stale_sid_mapping_self_heals(raw_sio_client):
         assert app.fake_redis.hget(app_mod.K_CHAR_TO_SID, char.id) == current_sid
 
 
+def test_move_byte_encoded_sid_mapping_is_accepted(raw_sio_client):
+    """Redis가 bytes를 반환해도 sid/map 비교는 문자열 기준으로 통과해야 한다."""
+    sc, app = raw_sio_client
+    import app as app_mod
+    from models import db
+    with app.app_context():
+        char = _make_user_and_char('byte_sid_map', map_key='city')
+        sc.emit('join_map', {'character_id': char.id, 'map_key': 'city'})
+
+        current_sid = app.fake_redis.hget(app_mod.K_CHAR_TO_SID, char.id)
+        assert current_sid is not None
+        app.fake_redis.hashes[app_mod.K_CHAR_TO_SID][str(char.id)] = current_sid.encode('utf-8')
+        app.fake_redis.hashes[app_mod.K_SID_TO_MAP][str(current_sid)] = b'city'
+
+        with patch.object(db.session, 'get', wraps=db.session.get) as spy_get:
+            sc.emit('move', {'character_id': char.id, 'map_key': 'city',
+                             'x': 32, 'y': 32})
+            spy_get.assert_called()
+
+
 def test_move_no_redis_mapping_rejected(sio_client):
     """Redis에 sid 매핑 없는 캐릭터의 move 이벤트 차단"""
     sc, app = sio_client
