@@ -58,4 +58,16 @@ describe('AdminDashboard', () => {
       expect(api.fetchAdminOverview).toHaveBeenCalledTimes(2)
     })
   })
+
+  it('shows an error alert when loading the overview fails', async () => {
+    vi.mocked(api.fetchAdminOverview).mockRejectedValue(new Error('Failed to load admin overview'))
+
+    render(
+      <MemoryRouter>
+        <AdminDashboard />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Failed to load admin overview')).toBeInTheDocument()
+  })
 })

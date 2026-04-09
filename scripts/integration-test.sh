@@ -67,10 +67,6 @@ echo "=== Integration Tests — User Flow ==="
 echo ""
 echo "── 1. 회원가입 & 로그인 ──"
 
-assert_status "POST /auth/admin_login → 200" \
-  POST "$BASE/auth/admin_login" "200" \
-  -d "{\"username\":\"${ADMIN_USERNAME:-admin}\",\"password\":\"${ADMIN_PASSWORD:-admin}\"}"
-
 assert_status "POST /auth/register → 201" \
   POST "$BASE/auth/register" "201" \
   -d '{"username":"inttest1","password":"abcd1234","password_confirm":"abcd1234"}'

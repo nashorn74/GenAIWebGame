@@ -65,4 +65,15 @@ describe('PrivateRoute', () => {
       expect(auth.setAdminAuthenticated).toHaveBeenCalledWith(false)
     })
   })
+
+  it('shows an error alert when session verification fails', async () => {
+    vi.mocked(api.fetchAdminSession).mockRejectedValue(new Error('server down'))
+
+    renderWithRouter('/admin/dashboard')
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to verify the admin session. Please sign in again.')).toBeInTheDocument()
+      expect(auth.setAdminAuthenticated).toHaveBeenCalledWith(false)
+    })
+  })
 })

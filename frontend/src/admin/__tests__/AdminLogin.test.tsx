@@ -62,4 +62,16 @@ describe('AdminLogin', () => {
 
     expect(await screen.findByText('Invalid credentials')).toBeInTheDocument()
   })
+
+  it('shows a generic error when the failure has no message', async () => {
+    vi.mocked(api.adminLogin).mockRejectedValue(new Error())
+    const user = userEvent.setup()
+    renderLogin()
+
+    await user.type(screen.getByLabelText('Username'), 'admin')
+    await user.type(screen.getByLabelText('Password'), 'wrong')
+    await user.click(screen.getByRole('button', { name: 'Login' }))
+
+    expect(await screen.findByText('Network error or server not responding')).toBeInTheDocument()
+  })
 })

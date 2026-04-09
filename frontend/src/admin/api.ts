@@ -107,14 +107,19 @@ export async function fetchUsers() {
 }
 
 export async function fetchUserDetail(id: number) {
-  const user = await request(`/api/users/${id}`, {
+  const userResponse = await fetch(`${BASE_URL}/api/users/${id}`, {
     credentials: 'include',
-  }).catch((error: Error & { message: string }) => {
-    if (error.message.includes('404')) {
-      throw new Error('User detail not found.')
-    }
-    throw error
   })
+
+  if (userResponse.status === 404) {
+    throw new Error('User detail not found.')
+  }
+
+  if (!userResponse.ok) {
+    throw await parseError(userResponse, 'Failed to load user detail.')
+  }
+
+  const user = await userResponse.json()
 
   const characters = await request(`/api/characters?user_id=${id}`, {
     credentials: 'include',
