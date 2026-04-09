@@ -18,6 +18,7 @@ const mockNPCs = [
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.fetchNPCs).mockResolvedValue(mockNPCs)
+  vi.spyOn(window, 'alert').mockImplementation(() => {})
 })
 
 describe('AdminNPCs', () => {

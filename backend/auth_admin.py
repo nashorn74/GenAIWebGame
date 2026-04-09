@@ -32,11 +32,9 @@ def admin_login():
     username = data.get('username', '').strip()
     password = data.get('password', '')
 
-    # 검증
     if username != ADMIN_USERNAME or password != ADMIN_PASSWORD:
         return jsonify({'error': 'Invalid admin credentials'}), 401
 
-    # 관리자 인증 성공 — 세션에 기록
     session['is_admin'] = True
     return jsonify({
         'message': 'Admin login successful',
@@ -49,3 +47,19 @@ def admin_logout():
     """관리자 로그아웃 — 세션 정리"""
     session.pop('is_admin', None)
     return jsonify({'message': 'Admin logged out'}), 200
+
+
+@admin_auth_bp.route('/admin_session', methods=['GET'])
+def admin_session():
+    """현재 요청이 관리자 세션으로 인증되었는지 확인한다."""
+    if not session.get('is_admin'):
+        return jsonify({
+            'authenticated': False,
+            'admin': False,
+        }), 401
+
+    return jsonify({
+        'authenticated': True,
+        'admin': True,
+        'username': ADMIN_USERNAME,
+    }), 200

@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage'
 import CharacterSelect  from './pages/CharacterSelect'
 import AdminLayout from './admin/AdminLayout'
 import AdminLogin from './admin/pages/AdminLogin'
+import AdminDashboard from './admin/pages/AdminDashboard'
 import AdminUsers from './admin/pages/AdminUsers'
 
 // PrivateRoute
@@ -49,51 +50,22 @@ function AppRoutes() {
       />
 
       {/* /admin 영역 */}
-      <Route path="/admin" element={<AdminLayout />}>
-        {/* 로그인 페이지 (권한 없이 접근 가능) */}
-        <Route path="login" element={<AdminLogin />} />
-
-        {/* 권한 필요한 관리자 페이지 */}
-        <Route
-          path="users"
-          element={
-            <PrivateRoute>
-              <AdminUsers />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="characters"
-          element={
-            <PrivateRoute>
-              <AdminCharacters />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="maps"
-          element={
-            <PrivateRoute>
-              <AdminMaps />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="npcs"
-          element={
-            <PrivateRoute>
-              <AdminNPCs />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="items"
-          element={
-            <PrivateRoute>
-              <AdminItems />
-            </PrivateRoute>
-          }
-        />
+      <Route path="/admin/login" element={<AdminLogin />} />
+      <Route
+        path="/admin"
+        element={
+          <PrivateRoute>
+            <AdminLayout />
+          </PrivateRoute>
+        }
+      >
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<AdminDashboard />} />
+        <Route path="users" element={<AdminUsers />} />
+        <Route path="characters" element={<AdminCharacters />} />
+        <Route path="maps" element={<AdminMaps />} />
+        <Route path="npcs" element={<AdminNPCs />} />
+        <Route path="items" element={<AdminItems />} />
       </Route>
     </Routes>
   )
